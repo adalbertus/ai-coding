@@ -7,6 +7,13 @@ Work ONLY this issue — do not list or switch to a different one.
 You've also been passed a file containing the last few commits. Review these to understand
 what work has been done.
 
+# REPO CONTRACT (## Ralph in CLAUDE.md)
+
+This loop is stack-agnostic. Everything specific to THIS repo — the feedback-loop commands
+to run, what "done" means (done-criteria), and any commit conventions — lives in the
+`## Ralph` section of this repo's CLAUDE.md. Read it now and follow it. A preflight guard has
+already confirmed the section exists and is usable, so it is safe to rely on.
+
 # SANITY CHECK BEFORE STARTING
 
 The `ready-for-agent` label is the contract for AFK-ready work, but that separation is by
@@ -23,32 +30,51 @@ is best-effort. So before implementing, verify two things with `gh`:
 
 # EXPLORATION
 
-Explore the repo.
+Explore the repo. Note its structure and conventions (CLAUDE.md), and the existing tests that
+the `## Ralph` feedback loops run.
 
 # IMPLEMENTATION
 
-Use /tdd to complete the task.
+Use /tdd to complete the task. Keep risky logic (parsing, the data layer, business rules,
+date math) in isolated, unit-testable modules, following this repo's conventions. Some work
+cannot be proven by the automated gate (e.g. UI, or device/native behaviour); for that, write
+the thin layer over the tested modules and rely on human verification — the `## Ralph`
+done-criteria say when that applies (see THE ISSUE).
 
 # FEEDBACK LOOPS
 
-Before committing, run the feedback loops:
-
-- `composer test` to run the test suites (Pest, parallel, against MySQL)
-- `./vendor/bin/pint` to fix code style
+Before committing, run the feedback loops declared in the `## Ralph` section of CLAUDE.md and
+make them all green. Do not invent commands — use exactly the ones declared there.
 
 # COMMIT
 
-Make a git commit. The commit message must:
-
-1. Include key decisions made
-2. Include files changed
-3. Blockers or notes for next iteration
+Make a git commit, following any commit conventions declared in `## Ralph` (e.g. message
+language, committing to `main` vs a branch/PR, where to put the detail). If `## Ralph` says
+nothing about commits, default to a message that records: (1) key decisions made, (2) files
+changed, (3) blockers or notes for the next iteration.
 
 # THE ISSUE
 
-If the task is complete, close the issue: `gh issue close <number> --comment "<summary of what shipped + the commit SHA>"`.
+Apply the done-criteria from `## Ralph` to decide how to close out:
 
-If the task is not complete, leave the issue open and record progress: `gh issue comment <number> --body "<what was done, what remains, blockers for next iteration>"`.
+- **Done and fully verified by the automated gate** — close the issue:
+  `gh issue close <number> --comment "<summary of what shipped + the commit SHA>"`.
+
+- **Implemented but the gate cannot prove it works** (the `## Ralph` done-criteria call for
+  human verification — e.g. UI, a device, or other manual checks) — do NOT close it. Leave it
+  open, mark it for a human, and post concrete, step-by-step manual test instructions in the
+  language/format the `## Ralph` section specifies (reference the actual UI labels where it
+  applies):
+  ```bash
+  gh label create needs-human-test --color 5319E7 --description "Implemented; awaiting human verification" 2>/dev/null
+  gh issue edit <number> --add-label needs-human-test
+  gh issue comment <number> --body "<what to verify, step by step>"
+  ```
+  After the human verifies, THEY close the issue.
+
+- **Not complete** (gate not green, or work unfinished) — leave the issue open WITHOUT the
+  `needs-human-test` label and record progress:
+  `gh issue comment <number> --body "<what was done, what remains, blockers for next iteration>"`.
 
 # FINAL RULES
 
