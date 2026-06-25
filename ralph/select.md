@@ -11,6 +11,9 @@ Your ONLY job is to choose the single next issue to work — you do NOT implemen
 - Skip any issue whose "Blocked by" section references another issue that is still open.
   All currently-open issues are listed above, so cross-reference the numbers: if a blocker
   appears in this list, it is still open — skip the blocked issue.
+- Skip any issue already labelled `needs-human-test` — it is implemented and waiting for a
+  human to verify it, not for the agent. (The loop script also enforces this; this is a
+  backstop. Inert where the label is unused.)
 - Skip any issue that plainly needs a human decision (architectural choice, design review,
   an ambiguous trade-off the body does not settle, or a destructive/irreversible step),
   even though it carries `ready-for-agent` — it may be mislabelled.

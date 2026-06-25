@@ -4,6 +4,21 @@
 #   1. a cheap selector picks the single next issue number;
 #   2. its `complexity:*` label is mapped to a model, and that model implements it.
 
+# 0. HARD GATE: never pile up unverified work. If any issue is already implemented and is
+#    waiting for a human to verify it (label `needs-human-test`), stop here and list them —
+#    do NOT pick up new work until they are verified and closed. Inert in repos that do not
+#    use the label (the query comes back empty). What counts as "done" per repo lives in the
+#    `## Ralph` section of CLAUDE.md.
+pending=$(gh issue list --label needs-human-test --state open \
+  --json number,title --jq '.[] | "  #\(.number): \(.title)"' 2>/dev/null)
+
+if [ -n "$pending" ]; then
+  echo "⏳ Zaimplementowane, czekają na weryfikację przez człowieka (needs-human-test)."
+  echo "   Sprawdź i zamknij, zanim ruszę po nową pracę:"
+  echo "$pending"
+  exit 0
+fi
+
 # 1. Pull open, agent-ready (AFK) issues from GitHub as the task list.
 #    The `ready-for-agent` label is the AFK filter (HITL issues won't carry it).
 #    PRDs/epics also carry `ready-for-agent` but are excluded here by title prefix,
