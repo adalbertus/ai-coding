@@ -4,6 +4,11 @@
 #   1. a cheap selector picks the single next issue number;
 #   2. its `complexity:*` label is mapped to a model, and that model implements it.
 
+# Self-locate: this script + its sibling prompts/guard live together (in the shared ralph/
+# dir, reached via a symlink on PATH). `realpath` resolves that symlink so prompts are read
+# from here, while gh/git below operate on the current repo (cwd).
+SCRIPT_DIR="$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")" && pwd)"
+
 # 0. HARD GATE: never pile up unverified work. If any issue is already implemented and is
 #    waiting for a human to verify it (label `needs-human-test`), stop here and list them —
 #    do NOT pick up new work until they are verified and closed. Inert in repos that do not
@@ -18,6 +23,11 @@ if [ -n "$pending" ]; then
   echo "$pending"
   exit 0
 fi
+
+# Strażnik (fail-closed): refuse to run unless this repo declares a usable "## Ralph"
+# section in CLAUDE.md. On halt it prints the reason + how to fix and exits non-zero, so
+# `|| exit 0` stops the loop cleanly (the message is already on screen).
+"$SCRIPT_DIR/preflight.sh" || exit 0
 
 # 1. Pull open, agent-ready (AFK) issues from GitHub as the task list.
 #    The `ready-for-agent` label is the AFK filter (HITL issues won't carry it).
@@ -39,7 +49,7 @@ commits=$(git log -n 5 --format="%H%n%ad%n%B---" --date=short 2>/dev/null || ech
 
 # 3. Stage 1 — cheap selector. Picks ONE issue number (or NO_TASK). Tool-free, so it
 #    reasons over the issue bodies provided above; runs on the cheapest capable model.
-select_prompt=$(cat ralph/select.md)
+select_prompt=$(cat "$SCRIPT_DIR/select.md")
 echo "Asking selector (claude-haiku-4-5) to pick the next issue... (this can take a while)"
 selection=$(claude -p --model claude-haiku-4-5-20251001 \
   "Previous commits: $commits Issues: $issues $select_prompt" 2>/dev/null)
@@ -71,7 +81,7 @@ echo "Selected issue #${num} (complexity:${complexity}) -> ${model}"
 # 5. Stage 2 — implement ONLY the selected issue, on the chosen model.
 issue=$(gh issue view "$num" --json number,title,body \
   --jq '"## Issue #\(.number): \(.title)\n\n\(.body)\n"' 2>/dev/null)
-prompt=$(cat ralph/prompt.md)
+prompt=$(cat "$SCRIPT_DIR/prompt.md")
 
 echo "Starting implementation of issue #${num} on ${model}..."
 claude --permission-mode acceptEdits --model "$model" \
