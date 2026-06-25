@@ -68,6 +68,12 @@ for entry in "${LAUNCHERS[@]}"; do
 done
 
 echo
-echo "Gotowe."
+echo "Gotowe (to instalujesz RAZ, globalnie — nie trzeba powtarzać per repo)."
 echo "  Skille:    /zapisz, /podsumuj, /ralph-konfiguracja, /to-issues-ralph"
 echo "  Launchery: ralph-once, ralph-once-local (wymagają $BIN_DIR w PATH)"
+echo
+echo "Następny krok — W KAŻDYM repo, w którym chcesz używać Ralpha:"
+echo "  1. odpal w sesji Claude (Sonnet+):  /ralph-konfiguracja"
+echo "     → zapisze sekcję ## Ralph do CLAUDE.md i utworzy labelki na GitHubie."
+echo "  2. (porządkowo) usuń stary, dedykowany katalog ralph/ z tego repo."
+echo "  Bez ## Ralph strażnik jest fail-closed i ralph-once od razu się zatrzyma."

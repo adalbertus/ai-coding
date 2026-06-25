@@ -13,7 +13,13 @@ Design: `CONTEXT.md` (słownik), `docs/adr/0001` (warstwowy fallback `/podsumuj`
 
 ## Instalacja
 
+Dwa etapy: **raz globalnie** instalujesz to repo, a potem **raz na repo** włączasz w nim Ralpha.
+
+### Etap 1 — raz, globalnie (instalacja `ai-coding`)
+
 ```bash
+git clone <ai-coding> ~/projects/ai-coding
+cd ~/projects/ai-coding
 ./install.sh
 ```
 
@@ -25,9 +31,32 @@ i **idempotentny** (ponowne uruchomienie nie psuje poprawnych symlinków). Tworz
 
 Źródło zostaje w tym repo, a `~/.claude/skills` i `~/.local/bin` tylko linkują — `realpath`
 rozwija symlink, więc skrypty Ralpha znajdują swoje prompty obok siebie. Repo projektowe
-**nie** zawiera symlinka, więc po sklonowaniu Ralpha odpalasz globalnym launcherem.
+**nie** zawiera symlinka, więc po sklonowaniu Ralpha odpalasz globalnym launcherem. To robisz
+**tylko raz** — nie powtarzasz `install.sh` w każdym repo.
 
 > Launchery wymagają `~/.local/bin` w `PATH`.
+
+### Etap 2 — raz na każde repo, w którym chcesz Ralpha
+
+W każdym repo trzeba przenieść specyfikę stacku do sekcji `## Ralph` w jego CLAUDE.md —
+inaczej strażnik jest fail-closed i `ralph-once` od razu halt-uje. Robi to `/ralph-konfiguracja`:
+
+```bash
+cd ~/projects/finanse-rsz-laravel     # repo nr 1 (Laravel)
+# w sesji Claude (Sonnet+):  /ralph-konfiguracja
+#   → wykrywa stack (composer test / pint), pisze ## Ralph do CLAUDE.md, tworzy labelki
+rm -rf ralph/                          # (porządkowo) usuń stary, dedykowany katalog
+ralph-once                             # pętla rusza, bo ## Ralph już jest
+
+cd ~/projects/dialog-app              # repo nr 2 (RN + Expo)
+# w sesji Claude (Sonnet+):  /ralph-konfiguracja
+#   → wykrywa stack (npm typecheck/lint/test + needs-human-test), pisze ## Ralph, tworzy labelki
+rm -rf ralph/
+ralph-once
+```
+
+Ten sam globalny `ralph-once` obsłużył oba repo o różnych stackach — jedyna różnica siedzi
+w sekcji `## Ralph` każdego z nich. `install.sh` z Etapu 1 nie był tu powtarzany.
 
 ## Skille `/zapisz` i `/podsumuj`
 
