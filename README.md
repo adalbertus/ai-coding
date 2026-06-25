@@ -38,20 +38,18 @@ rozwija symlink, więc skrypty Ralpha znajdują swoje prompty obok siebie. Repo 
 
 ### Etap 2 — raz na każde repo, w którym chcesz Ralpha
 
-W każdym repo trzeba przenieść specyfikę stacku do sekcji `## Ralph` w jego CLAUDE.md —
-inaczej strażnik jest fail-closed i `ralph-once` od razu halt-uje. Robi to `/ralph-konfiguracja`:
+Repo bez Ralpha potrzebuje tylko sekcji `## Ralph` w swoim CLAUDE.md — inaczej strażnik jest
+fail-closed i `ralph-once` od razu halt-uje. Sekcję pisze `/ralph-konfiguracja`:
 
 ```bash
-cd ~/projects/finanse-rsz-laravel     # repo nr 1 (Laravel)
+cd ~/projects/repo-laravel            # repo nr 1 — stack PHP/Laravel, jeszcze bez Ralpha
 # w sesji Claude (Sonnet+):  /ralph-konfiguracja
 #   → wykrywa stack (composer test / pint), pisze ## Ralph do CLAUDE.md, tworzy labelki
-rm -rf ralph/                          # (porządkowo) usuń stary, dedykowany katalog
-ralph-once                             # pętla rusza, bo ## Ralph już jest
+ralph-once                            # pętla rusza, bo ## Ralph już jest
 
-cd ~/projects/dialog-app              # repo nr 2 (RN + Expo)
+cd ~/projects/repo-expo               # repo nr 2 — stack RN/Expo, jeszcze bez Ralpha
 # w sesji Claude (Sonnet+):  /ralph-konfiguracja
 #   → wykrywa stack (npm typecheck/lint/test + needs-human-test), pisze ## Ralph, tworzy labelki
-rm -rf ralph/
 ralph-once
 ```
 
