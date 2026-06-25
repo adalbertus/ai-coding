@@ -1,0 +1,1 @@
+zebym nie zapomniał - do ralph/once dodac zeby po kazdej implementacji wypisywał jakie testy manualne miałbym zrobic (przynajmniej podstawy) - być moze warto dodac to do skilla /to-issues-ralph
