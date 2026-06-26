@@ -14,6 +14,7 @@ SCRIPT_DIR="$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")" && pwd)"
 #    do NOT pick up new work until they are verified and closed. Inert in repos that do not
 #    use the label (the query comes back empty). What counts as "done" per repo lives in the
 #    `## Ralph` section of CLAUDE.md.
+echo "Ralph: sprawdzam zadania czekające na weryfikację (needs-human-test)..."
 pending=$(gh issue list --label needs-human-test --state open \
   --json number,title --jq '.[] | "  #\(.number): \(.title)"' 2>/dev/null)
 
@@ -33,14 +34,14 @@ fi
 #    The `ready-for-agent` label is the AFK filter (HITL issues won't carry it).
 #    PRDs/epics also carry `ready-for-agent` but are excluded here by title prefix,
 #    so the loop only ever picks implementable tracer-bullet slices.
-echo "Fetching open agent-ready issues from GitHub..."
+echo "Pobieram otwarte zadania (ready-for-agent) z GitHuba..."
 issues=$(gh issue list --label ready-for-agent --state open \
   --json number,title,body \
   --jq '.[] | select(.title | startswith("PRD") | not) | "## Issue #\(.number): \(.title)\n\n\(.body)\n"' \
   2>/dev/null)
 
 if [ -z "$issues" ]; then
-  echo "No open agent-ready issues. Nothing to do."
+  echo "Brak otwartych zadań (ready-for-agent). Nie ma nic do zrobienia."
   exit 0
 fi
 
@@ -50,17 +51,17 @@ commits=$(git log -n 5 --format="%H%n%ad%n%B---" --date=short 2>/dev/null || ech
 # 3. Stage 1 — cheap selector. Picks ONE issue number (or NO_TASK). Tool-free, so it
 #    reasons over the issue bodies provided above; runs on the cheapest capable model.
 select_prompt=$(cat "$SCRIPT_DIR/select.md")
-echo "Asking selector (claude-haiku-4-5) to pick the next issue... (this can take a while)"
+echo "Selektor (claude-haiku-4-5) wybiera następne zadanie... (chwilę trwa)"
 selection=$(claude -p --model claude-haiku-4-5-20251001 \
   "Previous commits: $commits Issues: $issues $select_prompt" 2>/dev/null)
 num=$(printf '%s' "$selection" | grep -Eo 'NO_TASK|[0-9]+' | head -1)
 
 if [ -z "$num" ] || [ "$num" = "NO_TASK" ]; then
-  echo "Selector found no actionable issue (output: '${selection}'). Nothing to do."
+  echo "Selektor nie wskazał żadnego zadania (odpowiedź: '${selection}'). Nie ma nic do zrobienia."
   exit 0
 fi
 
-echo "Selector picked issue #${num}; resolving complexity label..."
+echo "Selektor wybrał issue #${num}; ustalam etykietę complexity..."
 
 # 4. Map the selected issue's complexity label to a model. Update ONLY this map as the
 #    best model per tier changes — the issue labels stay stable (complexity is intrinsic,
@@ -76,13 +77,13 @@ case "$complexity" in
   *)       model="claude-sonnet-4-6" ;; # 'normal' + anything unexpected
 esac
 
-echo "Selected issue #${num} (complexity:${complexity}) -> ${model}"
+echo "Wybrane issue #${num} (complexity:${complexity}) -> ${model}"
 
 # 5. Stage 2 — implement ONLY the selected issue, on the chosen model.
 issue=$(gh issue view "$num" --json number,title,body \
   --jq '"## Issue #\(.number): \(.title)\n\n\(.body)\n"' 2>/dev/null)
 prompt=$(cat "$SCRIPT_DIR/prompt.md")
 
-echo "Starting implementation of issue #${num} on ${model}..."
+echo "Zaczynam implementację issue #${num} na ${model}..."
 claude --permission-mode acceptEdits --model "$model" \
   "Previous commits: $commits Issue to work (work ONLY this one): $issue $prompt"

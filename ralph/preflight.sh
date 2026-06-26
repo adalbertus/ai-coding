@@ -52,6 +52,7 @@ $section"
 if [ -n "${RALPH_GATE_CMD:-}" ]; then
   verdict=$($RALPH_GATE_CMD 2>/dev/null)
 else
+  echo "Strażnik: weryfikuję sekcję ## Ralph na modelu Haiku... (chwilę trwa)" >&2
   verdict=$(claude -p --model claude-haiku-4-5-20251001 "$gate_prompt" 2>/dev/null)
 fi
 
