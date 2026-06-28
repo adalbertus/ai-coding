@@ -13,13 +13,34 @@ Delegating (not copying) means upstream changes to `to-issues` keep working here
 
 ## Workflow
 
+0. **Prefix the parent PRD issue.** If the source is an existing GitHub issue (the PRD),
+   rename it to add a `[PRD]` prefix — unless the title already starts with `[PRD]`:
+   ```bash
+   gh issue edit <prd-n> --title "[PRD] $(gh issue view <prd-n> --json title -q .title)"
+   ```
+
 1. **Run the standard breakdown.** Invoke the `to-issues` skill and let it draft, quiz,
    and publish the vertical-slice issues exactly as usual (it applies the AFK triage
    label itself). Do not duplicate or alter that process.
+   Prefix every issue title with `[ISSUE]` (e.g. `[ISSUE] Add user login`).
 
-2. **Triage complexity.** After the issues are published, add **exactly one**
-   `complexity:*` label to each, using the rubric below. Create the label first if the
-   repo lacks it:
+2. **Add manual verification steps.** For each published issue, edit its body to append
+   a `## Jak sprawdzić ręcznie` section — a brief, concrete list (3–5 bullets) showing
+   the golden path a human can follow to confirm the slice works. Skip only for pure
+   documentation/config changes with nothing observable.
+
+   ```bash
+   gh issue edit <n> --body "$(gh issue view <n> --json body -q .body)
+
+   ## Jak sprawdzić ręcznie
+
+   - krok 1
+   - krok 2"
+   ```
+
+3. **Triage complexity.** After adding verification steps, add **exactly one**
+   `complexity:*` label to each issue, using the rubric below. Create the label first if
+   the repo lacks it:
    ```bash
    gh label create complexity:heavy   --color B60205 --description "Highest-capability model" 2>/dev/null
    gh label create complexity:normal  --color FBCA04 --description "Default model" 2>/dev/null
@@ -27,7 +48,7 @@ Delegating (not copying) means upstream changes to `to-issues` keep working here
    gh issue edit <n> --add-label complexity:<tier>
    ```
 
-3. **Record why (heavy only).** For a `complexity:heavy` issue, add one line to its body
+4. **Record why (heavy only).** For a `complexity:heavy` issue, add one line to its body
    stating why (e.g. "heavy — touches tenant-isolation logic"), for the human reader who
    picks it up weeks later.
 
