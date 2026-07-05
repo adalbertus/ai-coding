@@ -54,24 +54,42 @@ Delegating (not copying) means upstream changes to `to-issues` keep working here
 
 ## Complexity rubric
 
-The label encodes intrinsic complexity, NOT a model name. The complexity of a slice does
-not change over time; which model is best for each tier does — that mapping lives only in
-`ralph/once.sh`. Never put a model name in the label.
+The label encodes intrinsic complexity, NOT a model name. Complexity here means one precise
+thing: **would a stronger model materially change the outcome?** — the difficulty of getting
+the implementation *right*, not the blast radius of getting it *wrong*. Those axes are
+orthogonal, and only the first justifies a pricier model. The complexity→model mapping lives
+only in `ralph/once.sh`; never put a model name in the label.
 
-- **`complexity:trivial`** — ONLY truly mechanical, zero-logic changes: a documentation
-  typo, a config/constant bump, a pure rename, a dependency version bump. If a human
-  reviewer would not need to think, it is trivial. **Anything that touches behaviour or
-  logic — however small — is NOT trivial.** When in doubt, it is `normal`. This tier runs
-  on the weakest model unattended, so be strict.
+**Blast radius is not complexity.** A wide-but-mechanical change (e.g. `ADD COLUMN … DEFAULT 0`
+on a shared table) can break a lot if wrong, yet a stronger model implements it no better. The
+safety net for blast radius is the automated gate plus `needs-human-test`, not a more expensive
+model — so route such a slice by its substance, which is usually `normal`.
 
-- **`complexity:normal`** — the default. A well-scoped tracer-bullet slice with clear
-  acceptance criteria: an additive field, an isolated service with tests, ordinary CRUD.
-  Most slices are normal. Use this whenever you hesitate.
+**Design judgment is front-loaded.** By the time a slice reaches this loop it has been through
+`/grill-with-docs` → PRD → breakdown on a strong model with a human, so "the design isn't
+settled" should almost never appear here. If a slice still looks under-specified, that is a gap
+in the grill or breakdown: **sharpen its acceptance criteria until a mid-tier model can finish
+it — do not escalate the model to paper over a vague issue.** Sharpen before you escalate.
 
-- **`complexity:heavy`** — high blast radius or genuine judgment required: a schema
-  migration on shared/widely-used tables, tenant-isolation or other security/authorization
-  logic, anything the source marks "run code-review before merging", or a slice whose
-  design is not fully settled by the acceptance criteria.
+- **`complexity:trivial`** — ONLY truly mechanical, zero-logic changes: a documentation typo, a
+  config/constant bump, a pure rename, a dependency version bump. If a human reviewer would not
+  need to think, it is trivial. **Anything that touches behaviour or logic — however small — is
+  NOT trivial.** When in doubt, it is `normal`. This tier runs on the weakest model unattended,
+  so be strict.
+
+- **`complexity:normal`** — the default, and the target for almost everything. A well-scoped
+  tracer-bullet slice with clear acceptance criteria: an additive field, an isolated service
+  with tests, ordinary CRUD — and also wide-but-mechanical changes whose risk is covered by the
+  gate plus human test. If a settled spec and the worker's own tests can close it, it is normal.
+  Use this whenever you hesitate.
+
+- **`complexity:heavy`** — reserved for the one case where a stronger model genuinely pays back:
+  **implementation correctness that a green gate would not prove.** Concretely, work where a
+  plausible-but-wrong implementation would pass the tests the worker writes for itself —
+  tenant-isolation / authorization / other security enforcement, or subtle logic (financial,
+  date/time, algorithmic) with easy-to-miss cases. The tell: a stronger model is more likely to
+  enumerate *what to test*, not merely to pass the obvious test. Nothing else — not size, not
+  blast radius, not a "run code-review before merging" note — is enough on its own.
 
 ## Notes
 

@@ -86,9 +86,11 @@ per repo in the `## Ralph` section.
 _Avoid_: definition of done / DoD.
 
 **complexity** (złożoność):
-A task's intrinsic difficulty — `trivial` / `normal` / `heavy` — independent of any model. The
+A task's intrinsic difficulty — `trivial` / `normal` / `heavy` — meaning specifically whether a
+stronger model would change the *outcome*: the difficulty of getting the implementation right,
+not the blast radius of getting it wrong (only the former warrants a pricier model). The
 complexity→model mapping lives only in the loop script, so labels stay stable as models change.
-_Avoid_: putting a model name in the label.
+_Avoid_: putting a model name in the label; conflating it with blast radius.
 
 **needs-human-test**:
 A task already implemented but awaiting a human to verify it (e.g. on a real device). While one
