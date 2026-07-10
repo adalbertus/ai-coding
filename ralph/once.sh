@@ -52,7 +52,7 @@ commits=$(git log -n 5 --format="%H%n%ad%n%B---" --date=short 2>/dev/null || ech
 #    reasons over the issue bodies provided above; runs on the cheapest capable model.
 select_prompt=$(cat "$SCRIPT_DIR/select.md")
 echo "Selektor (claude-haiku-4-5) wybiera następne zadanie... (chwilę trwa)"
-selection=$(claude -p --model claude-haiku-4-5-20251001 \
+selection=$(claude -p --model claude-haiku-4-5-20251001 --effort low \
   "Previous commits: $commits Issues: $issues $select_prompt" 2>/dev/null)
 num=$(printf '%s' "$selection" | grep -Eo 'NO_TASK|[0-9]+' | head -1)
 
@@ -63,21 +63,23 @@ fi
 
 echo "Selektor wybrał issue #${num}; ustalam etykietę complexity..."
 
-# 4. Map the selected issue's complexity label to a model. Update ONLY this map as the
-#    best model per tier changes — the issue labels stay stable (complexity is intrinsic,
-#    the model du jour is not). An untagged issue is treated as 'normal' (safe default).
+# 4. Map the selected issue's complexity label to a model AND a reasoning-effort level.
+#    Update ONLY this map as the best model/effort per tier changes — the issue labels stay
+#    stable (complexity is intrinsic, the model/effort du jour is not). Cheap tiers run at
+#    lower effort so trivial work stops burning high-effort thinking tokens; heavy keeps the
+#    top effort. An untagged issue is treated as 'normal' (safe default).
 complexity=$(gh issue view "$num" --json labels \
   --jq '[.labels[].name | select(startswith("complexity:"))][0] // "complexity:normal" | sub("complexity:"; "")' \
   2>/dev/null)
 complexity="${complexity:-normal}"
 
 case "$complexity" in
-  heavy)   model="claude-opus-4-8" ;;
-  trivial) model="claude-haiku-4-5-20251001" ;;
-  *)       model="claude-sonnet-4-6" ;; # 'normal' + anything unexpected
+  heavy)   model="opus";   effort="high"   ;;
+  trivial) model="haiku";  effort="medium" ;;
+  *)       model="sonnet"; effort="medium" ;; # 'normal' + anything unexpected
 esac
 
-echo "Wybrane issue #${num} (complexity:${complexity}) -> ${model}"
+echo "Wybrane issue #${num} (complexity:${complexity}) -> ${model} (effort:${effort})"
 
 # 5. Stage 2 — implement ONLY the selected issue, on the chosen model.
 issue=$(gh issue view "$num" --json number,title,body \
@@ -85,5 +87,5 @@ issue=$(gh issue view "$num" --json number,title,body \
 prompt=$(cat "$SCRIPT_DIR/prompt.md")
 
 echo "Zaczynam implementację issue #${num} na ${model}..."
-claude --permission-mode acceptEdits --model "$model" \
+claude --permission-mode acceptEdits --model "$model" --effort "$effort" \
   "Previous commits: $commits Issue to work (work ONLY this one): $issue $prompt"
