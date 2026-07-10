@@ -85,6 +85,15 @@ The condition under which a task counts as finished: whether the automated gate 
 per repo in the `## Ralph` section.
 _Avoid_: definition of done / DoD.
 
+**doc-sync** (synchronizacja trwałej dokumentacji):
+Reconciling a repo's durable docs with what a task actually shipped, done as part of the *act
+of closing it* — whoever closes first syncs. Two classes: *statusowe* (known-gaps, backlog) the
+closer rewrites; *słownikowe/projektowe* (CONTEXT.md, ADR) the closer only **flags**, never
+silently rewrites (the glossary belongs to the grill, not the loop). Self-close → the worker
+syncs in the same commit; `needs-human-test` → deferred to the human's close-out confirmation.
+Which docs and which class is declared per repo in the `## Ralph` section.
+_Avoid_: folding it into the automated gate; the worker rewriting CONTEXT.md / ADRs.
+
 **complexity** (złożoność):
 A task's intrinsic difficulty — `trivial` / `normal` / `heavy` — meaning specifically whether a
 stronger model would change the *outcome*: the difficulty of getting the implementation right,

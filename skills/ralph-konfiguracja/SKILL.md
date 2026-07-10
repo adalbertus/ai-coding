@@ -17,9 +17,10 @@ the user before writing.
 
 ## What it produces
 
-1. A `## Ralph` section in the repo's `CLAUDE.md` (created if the file is absent), with three
-   parts the strażnik checks for: **feedback loops** + **done-criteria** (required), and
-   **commit conventions** (recommended).
+1. A `## Ralph` section in the repo's `CLAUDE.md` (created if the file is absent), with the
+   parts the strażnik checks for — **feedback loops** + **done-criteria** (required) — plus
+   **commit conventions** and **doc-sync** (both recommended; doc-sync only if the repo keeps
+   durable docs it can invalidate).
 2. The GitHub labels the loop relies on — **only** for GitHub-backed repos.
 
 ## Workflow
@@ -53,13 +54,32 @@ human?** This drives how the worker closes issues (see `ralph/prompt.md` → THE
 
 Write the criteria as concrete sentences, not "when it works".
 
-### 3. Decide commit conventions (recommended)
+### 3. Detect the durable docs (doc-sync)
+
+Find the repo's **durable documentation** — the long-lived files whose content a shipped change
+can invalidate. Look for things like `known-gaps.md`, a `backlog`/`ROADMAP`, `CONTEXT.md`,
+`docs/adr/`. This set is per-repo: some repos have only `CONTEXT.md`, some several docs, some
+none. Do not guess — list what actually exists and confirm the list with the user.
+
+Classify each doc into one of two classes (this drives what the closer is allowed to do):
+
+- **status-class** (e.g. `known-gaps`, `backlog`) — factual "what's done / what's left". The
+  closer **rewrites** these to match reality.
+- **glossary/design-class** (`CONTEXT.md`, `docs/adr/`) — the shared language and settled
+  decisions. The closer only **flags** a needed change (a comment/note); it never rewrites them.
+  The glossary belongs to the design phase (`/grill-with-docs`), not the implementation loop.
+
+If the repo keeps no durable docs, skip this — omit the doc-sync subsection and the loop's
+trigger stays inert. Otherwise you write the list + classes into the `## Ralph` section (next
+step); that is what makes doc-sync fire on close. See `docs/adr/0004` for the rationale.
+
+### 4. Decide commit conventions (recommended)
 
 Capture anything non-default so the worker matches the repo: message **language**, commit to
 **`main`** vs a **branch/PR**, and where the detail goes (commit body vs issue thread). If the
 repo has no special convention, you may omit this part — the prompt has a sensible fallback.
 
-### 4. Write the `## Ralph` section
+### 5. Write the `## Ralph` section
 
 Create `CLAUDE.md` if missing. If a `## Ralph` section already exists, **replace it in place**
 (don't append a duplicate). Use a level-2 heading exactly `## Ralph` — the strażnik greps for
@@ -82,6 +102,20 @@ Zadanie jest skończone, gdy wszystkie feedback loops są zielone <oraz …>.
 automatycznie — nie zamykaj takich issue. Oznacz `needs-human-test` i zostaw człowiekowi
 z konkretnymi krokami testowymi po polsku, odwołującymi się do realnych etykiet UI.>
 
+### Doc-sync (trwała dokumentacja — synchronizuj przy zamknięciu issue)
+
+<Wypełnij tylko, jeśli repo trzyma trwałe dokumenty; inaczej pomiń całą podsekcję.>
+Zamykając issue (sam albo po potwierdzeniu człowieka), najpierw pogódź poniższe dokumenty
+z tym, co realnie weszło:
+
+- `<ścieżka>` — **statusowy** → aktualizuj treść i wrzuć do commita.
+- `CONTEXT.md`, `docs/adr/` — **słownikowe/projektowe** → tylko zgłoś potrzebę zmiany
+  (komentarz w issue), NIE przepisuj; słownikiem rządzi grill, nie pętla.
+
+Gdy zamykam ręcznie issue z `needs-human-test` („potwierdzam" / „zamykaj" / „zrobione,
+zamykaj"): potraktuj to jako sygnał — najpierw zsynchronizuj dokumenty statusowe (zmianę
+wyprowadź z treści issue i jego commitów), dopiero potem zamknij.
+
 ### Commit
 
 <np. wiadomość po polsku, krótka; commit prosto na `main`, bez brancha/PR; detal w wątku issue.>
@@ -90,7 +124,7 @@ z konkretnymi krokami testowymi po polsku, odwołującymi się do realnych etyki
 Fill every placeholder. The section the strażnik accepts has **concrete, executable**
 instructions for both feedback loops and done-criteria.
 
-### 5. Create the loop's GitHub labels (GitHub-backed repos only)
+### 6. Create the loop's GitHub labels (GitHub-backed repos only)
 
 If the repo has a GitHub remote (`gh repo view` succeeds), create the labels the loop and the
 triage skill rely on. Skip this entirely for local-files repos (those driven by
@@ -106,7 +140,7 @@ gh label create complexity:trivial --color 0E8A16 --description "Cheapest model 
 
 (`2>/dev/null` keeps it idempotent — re-running is harmless when a label already exists.)
 
-### 6. Hand back
+### 7. Hand back
 
 Tell the user in one or two Polish sentences what was written and what is next: that
 `ralph-once` (or `ralph-once-local`) will now pass the strażnik in this repo, and that issues

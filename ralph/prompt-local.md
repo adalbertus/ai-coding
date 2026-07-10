@@ -48,6 +48,21 @@ done-criteria say when that applies (see THE ISSUE).
 Before committing, run the feedback loops declared in the `## Ralph` section of CLAUDE.md and
 make them all green. Do not invent commands — use exactly the ones declared there.
 
+# DOC-SYNC (only when you will move the issue to issues/done/)
+
+If — and ONLY if — this issue's done-criteria are fully met by the automated gate and you are
+about to move it to `issues/done/` yourself (no human verification needed), reconcile this
+repo's durable docs with what you actually shipped, and include those edits in the commit below.
+The `## Ralph` section lists the docs and their class:
+
+- **status-class** docs (e.g. known-gaps, backlog) — update them to match reality.
+- **glossary/design-class** docs (e.g. CONTEXT.md, ADRs) — do NOT rewrite; at most note the
+  needed change in the issue file. They belong to the design phase, not this loop.
+
+If `## Ralph` declares no durable docs, this step is inert — skip it. If the issue instead needs
+human verification (see THE ISSUE), do NOT sync docs now — doc-sync for that path is deferred to
+the human's close-out.
+
 # COMMIT
 
 Make a git commit, following any commit conventions declared in `## Ralph` (e.g. message

@@ -102,6 +102,9 @@ Prompty są stack-agnostyczne — całą specyfikę repo delegują do sekcji `##
 - **done-criteria** — kiedy zadanie jest skończone; czy część pracy wymaga weryfikacji
   człowieka (UI/urządzenie → `needs-human-test`).
 - **commit** (opcjonalnie) — język wiadomości, `main` vs branch/PR, gdzie trafia detal.
+- **doc-sync** (opcjonalnie) — trwałe dokumenty repo (known-gaps, backlog) i ich klasa; zamykając
+  issue worker/człowiek najpierw godzi je z tym, co weszło. Słownik (`CONTEXT.md`) i ADR-y tylko
+  się zgłasza, nie przepisuje. Bierny, gdy repo nie ma trwałych dokumentów.
 
 Sekcję pisze `/ralph-konfiguracja` — nie pisz jej ręcznie.
 
