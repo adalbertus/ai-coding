@@ -21,8 +21,10 @@ a nie lokalny dla `brewiarz`; `ai-coding` go nie odczuwał tylko dlatego, że je
   szacuje wielkość pliku (czego przed `Read` nie umie) ani budżet tokenów (czego nie umie
   zmierzyć). Decyzję podejmuje worker w trakcie działania; człowieka w pętli AFK z definicji nie ma.
 - **`/ralph-konfiguracja` może zaproponować zmianę sformułowania poza sekcją `## Ralph`.** Nowy
-  krok wykrywa duże pliki referencyjne (>20 KB) i instrukcje wskazujące na nie czasownikiem
-  „przeczytaj", po czym **proponuje** przeformułowanie na „konsultuj (grepnij po terminie)".
+  krok wykrywa duże cele referencyjne — **plik >20 KB albo katalog wskazywany jako całość**
+  (`docs/adr/` z trzydziestu małych ADR-ów to te same 100 KB, których próg per-plik nie łapie) —
+  oraz instrukcje wskazujące na nie (`read`, `refer to`, `czytaj`, nagłówek „Read these first"),
+  po czym **proponuje** przeformułowanie na „konsultuj (grepnij po terminie)".
   Propozycja, nie cicha edycja — skill jest HITL i potwierdza każdy element.
 
 **Rozważane opcje.**

@@ -155,9 +155,14 @@ that the exploration protocol handles it anyway and the reword is noise.
 
 1. Find the repo's large reference files: `find . -size +20k -name '*.md' -not -path './node_modules/*'`
    plus any oversized single-purpose source file the docs point at.
-2. Grep CLAUDE.md for instructions that point at them with a read verb (`read`, `przeczytaj`,
-   `zapoznaj się`).
-3. **Propose** the reword to the user — show the old line and the new one, and let them accept.
+2. **Also check directories pointed at as a whole** (`docs/adr/`, `docs/`) — thirty small ADRs
+   are individually harmless and collectively 100 KB, which the per-file threshold misses.
+   `du -ck docs/adr/*.md | tail -1`.
+3. Grep CLAUDE.md for instructions that point at any of them. The verb need not be `read` —
+   `refer to`, `see`, `czytaj`, `zapoznaj się`, or a "Read these first" heading all produce the
+   same wholesale `Read`. What matters is that the line names a large target and gives no hint
+   that consulting a part of it is enough.
+4. **Propose** the reword to the user — show the old line and the new one, and let them accept.
    Never rewrite parts of CLAUDE.md outside `## Ralph` without confirmation; this is the one
    step where this skill touches somebody else's prose. Pattern:
 
