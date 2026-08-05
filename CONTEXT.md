@@ -64,6 +64,17 @@ _Avoid_: agent, automat, bot.
 The model run that actually implements the selected task (explores, `/tdd`, commits). Distinct
 from the **selektor** (only picks the next task) and the **strażnik** (only gates).
 
+**Protokół eksploracji** (exploration protocol):
+The rule for how the worker gets facts out of a repo: search first (`Grep`/`Glob`, then `Read`
+only the matching range), and delegate to a subagent only when no search pattern can be
+formulated because an overview is needed rather than a fact. Deliberately **size-blind** — the
+criterion is whether the worker can name what it is looking for, not how big the file is (it
+cannot know that before reading). Guards the *smart zone*: context spent on wholesale reads is
+context missing from the implementation. Lives in `ralph/prompt.md`, so it applies to every repo
+at once. Zob. `docs/adr/0005`.
+_Avoid_: „budżet kontekstu" (a token budget the model has no way to measure); a per-repo list of
+large files (it rots, and the protocol does not need it).
+
 **Selektor** (selector):
 A cheap-model run that, from the open tasks, picks the single next one — it implements nothing.
 GitHub flavour only; the local flavour has no selector.

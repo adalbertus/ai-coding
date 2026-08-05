@@ -3,7 +3,8 @@
 Personal Claude Code tooling: skills (`/zapisz`, `/podsumuj`, `/ralph-konfiguracja`,
 `/to-issues-ralph`) plus the shared Ralph loop. Distributed as symlinks by `install.sh`.
 
-- **Glossary / domain model:** `CONTEXT.md` — read before introducing a new term, and add it there.
+- **Glossary / domain model:** `CONTEXT.md` — consult it (grep for the term) before introducing a
+  new term, and add it there. It is a glossary: look terms up, don't read it end to end.
 - **Design decisions:** `docs/adr/` — document any significant architecture change with a new ADR.
 - **User-facing overview:** `README.md`.
 

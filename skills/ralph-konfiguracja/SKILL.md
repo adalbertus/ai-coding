@@ -1,6 +1,6 @@
 ---
 name: ralph-konfiguracja
-description: One-time HITL setup that makes a repo runnable by the shared Ralph loop. Detects the stack, writes a usable "## Ralph" section (feedback loops + done-criteria + commit conventions) into the repo's CLAUDE.md, and creates the GitHub labels the loop relies on. Run it in a Claude session on Sonnet or better. Invoked only explicitly via /ralph-konfiguracja (the preflight strażnik points the user here when the section is missing).
+description: One-time HITL setup that makes a repo runnable by the shared Ralph loop. Detects the stack, writes a usable "## Ralph" section (feedback loops + done-criteria + commit conventions) into the repo's CLAUDE.md, creates the GitHub labels the loop relies on, and proposes rewording any CLAUDE.md instruction that makes agents read a large reference file wholesale. Run it in a Claude session on Sonnet or better. Invoked only explicitly via /ralph-konfiguracja (the preflight strażnik points the user here when the section is missing).
 disable-model-invocation: true
 ---
 
@@ -22,6 +22,8 @@ the user before writing.
    **commit conventions** and **doc-sync** (both recommended; doc-sync only if the repo keeps
    durable docs it can invalidate).
 2. The GitHub labels the loop relies on — **only** for GitHub-backed repos.
+3. Where it applies: a **reworded** instruction elsewhere in that CLAUDE.md, so agents consult
+   large reference files instead of reading them whole (proposed to the user, never silent).
 
 ## Workflow
 
@@ -140,11 +142,35 @@ gh label create complexity:trivial --color 0E8A16 --description "Cheapest model 
 
 (`2>/dev/null` keeps it idempotent — re-running is harmless when a label already exists.)
 
-### 7. Hand back
+### 7. Reword instructions that force whole-file reads (outside `## Ralph`)
+
+The rest of this repo's CLAUDE.md often carries a line like *"`CONTEXT.md` — read before
+introducing a new term"*. A worker obeys it literally: a full `Read` of a 68 KB glossary is
+~25k tokens, spent before it writes a line of code, and it stays in context for the whole run.
+`ralph/prompt.md` tells the worker to search rather than read, but an instruction in CLAUDE.md
+saying "read" outranks it in the worker's eyes — so fix the source instead of arguing with it.
+
+Only worth doing where the pointed-at file is genuinely large (rule of thumb: **>20 KB**). Below
+that the exploration protocol handles it anyway and the reword is noise.
+
+1. Find the repo's large reference files: `find . -size +20k -name '*.md' -not -path './node_modules/*'`
+   plus any oversized single-purpose source file the docs point at.
+2. Grep CLAUDE.md for instructions that point at them with a read verb (`read`, `przeczytaj`,
+   `zapoznaj się`).
+3. **Propose** the reword to the user — show the old line and the new one, and let them accept.
+   Never rewrite parts of CLAUDE.md outside `## Ralph` without confirmation; this is the one
+   step where this skill touches somebody else's prose. Pattern:
+
+   > `CONTEXT.md` — ~~read~~ **consult it (grep for the term)** before introducing a new term.
+   > It is a glossary: look terms up, don't read it end to end.
+
+Skip the step entirely when the repo has no large reference file. See `docs/adr/0005`.
+
+### 8. Hand back
 
 Tell the user in one or two Polish sentences what was written and what is next: that
 `ralph-once` (or `ralph-once-local`) will now pass the strażnik in this repo, and that issues
-get triaged with `/to-issues-ralph`.
+get triaged with `/to-issues-ralph`. Mention the reword from step 7 only if one was made.
 
 ## Notes
 

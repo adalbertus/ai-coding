@@ -35,6 +35,21 @@ Pick the next task. Prioritize tasks in this order:
 Explore the repo. Note its structure and conventions (CLAUDE.md), and the existing tests that
 the `## Ralph` feedback loops run.
 
+**Search before you read.** A full `Read` of a large reference file (a glossary, a big module)
+can cost tens of thousands of tokens, and every one of them stays in context for the rest of the
+run — degrading your own reasoning exactly when the implementation needs it. So:
+
+- **If you can name what you are looking for** — a term, a symbol, a function, a path — use
+  `Grep`/`Glob`, then `Read` only the matching range (`offset`/`limit`). This is the default, and
+  it is not a compromise: it returns the exact source text, just less of it.
+- **Only if you cannot formulate a search pattern**, because you need an overview rather than a
+  specific fact, delegate to the `Explore` subagent. It reads in its own context and returns
+  conclusions. It costs a full extra model run and gives you a paraphrase instead of the source,
+  so it earns its keep for open-ended reconnaissance and nothing else.
+
+This is how to read an instruction like "read `CONTEXT.md` before introducing a new term" in a
+repo's CLAUDE.md: **consult** that file for what you need. Do not pull all of it into context.
+
 # IMPLEMENTATION
 
 Use /tdd to complete the task. Keep risky logic (parsing, the data layer, business rules,
