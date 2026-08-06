@@ -61,8 +61,9 @@ w sekcji `## Ralph` każdego z nich. `install.sh` z Etapu 1 nie był tu powtarza
 - **`/zapisz`** — na granicy fazy zapisuje minimalny wskaźnik pozycji do `./tmp/STATUS.md`
   (gdzie skończyłem + następny krok). Nie przepisuje pracy — ta siedzi w artefaktach (PRD, issues).
 - **`/podsumuj`** — na żądanie daje 2–3 zdania „gdzie jestem + następny krok", sam dobierając
-  źródło: żywy kontekst (**ciepło**) → `./tmp/STATUS.md` (**zimno**) → ostatni transkrypt sesji
-  (za zgodą).
+  źródło: żywy kontekst (**ciepło**) → `./tmp/GRILL.md` → `./tmp/STATUS.md` (**zimno**) →
+  ostatni transkrypt sesji (za zgodą). Niedomknięty grill bije STATUS — jest nowszy z definicji
+  i konkretniejszy.
 
 Oba wołane są **tylko jawnie** (`disable-model-invocation`) — nie odpalą się same.
 
@@ -79,6 +80,49 @@ Zapisano: 2026-06-25 15:59
 
 `./tmp/` jest poza gitem (zob. `.gitignore`) — STATUS jest lokalny per maszyna; przy jednym
 wątku na repo i jednej maszynie to wystarcza.
+
+## Skill `/grilluj`
+
+Punkt wejścia do sesji projektowych, żeby **nie kompaktować** długiego grilla. Kompakt gubi to,
+co **odrzucone**, więc sesja wraca do zamkniętych gałęzi i pyta drugi raz o to samo — jedna sesja
+zjadła 6 kompaktów po ~100k za zero produktu pracy. Zamiast tego: rozstrzygnięcia lądują
+w `CONTEXT.md`/ADR, otwarte w `./tmp/GRILL.md`, a kontekst czyścisz `/clear`-em. Zob.
+`docs/adr/0006`.
+
+```bash
+/grilluj <temat>     # start
+/grilluj             # w trakcie → checkpoint, potem /clear
+/grilluj             # po /clear → wznowienie od następnej otwartej gałęzi
+/grilluj domknięte   # koniec → kasuje GRILL.md, wskazuje /to-prd
+```
+
+Tryb rozpoznaje po tym, **czy w kontekście jest sesja grillowania** — nie po istnieniu pliku.
+Sam grill prowadzi skill `grill-with-docs`, wołany (nigdy kopiowany). Dotyczy **każdej** sesji
+deliberacyjnej, także takiej bez skilla; sesje implementacyjne (Ralph) są poza zakresem —
+tam kontekst to dosłowne odczyty plików i czyszczenie go jest stratą, nie zyskiem.
+
+### Format `./tmp/GRILL.md`
+
+```markdown
+# Grill: <temat>
+Zapisano: 2026-08-06 21:15 · Wznowić: grill-with-docs | rozmowa
+
+## Ustalone
+- <decyzja w jednej linii> (<powód w kilku słowach>)
+- <termin albo decyzja> → ADR 0006 · CONTEXT: ramka
+
+## Otwarte
+1. <gałąź> — <część już ustalona, jeśli połowicznie rozstrzygnięta>
+
+## Odrzucone
+- <wariant> — <powód>
+
+## Słownik
+- <termin> — <znaczenie ustalone w tej sesji>
+```
+
+Sekcja **Odrzucone** jest tu najważniejsza: to ona ginie w kompakcie i to przez jej brak wznowiona
+sesja z entuzjazmem wraca do wariantu odstrzelonego czterdzieści pytań wcześniej.
 
 ## Współdzielony Ralph
 

@@ -1,6 +1,6 @@
 ---
 name: podsumuj
-description: Gives a 2–3 sentence readout of "where I am + next step", picking its source: live context → ./tmp/STATUS.md → last session transcript. Invoked only explicitly via /podsumuj.
+description: Gives a 2–3 sentence readout of "where I am + next step", picking its source: live context → ./tmp/GRILL.md → ./tmp/STATUS.md → last session transcript. Invoked only explicitly via /podsumuj.
 disable-model-invocation: true
 ---
 
@@ -15,8 +15,15 @@ recap — orient on **position**. End with a light offer to start ("Ruszamy?"). 
 You have an earlier conversation from this session in context (beyond the bare `/podsumuj`
 invocation) → **summarize it**. Don't touch any files.
 
-### 2. Cold — no context, STATUS exists
-Empty context but `./tmp/STATUS.md` exists → summarize from it.
+### 2. Cold — no context, GRILL exists
+Empty context but `./tmp/GRILL.md` exists → an unfinished grill outranks STATUS: it is both newer
+by construction and more specific. Read it and say, in Polish, what the topic is and how many
+branches are still open, with **`/grilluj`** as the next step. Don't dump the file — 2–3 sentences,
+same as always. (This covers *returning after a break*; right after a checkpoint the user types
+`/grilluj` directly and never gets here.)
+
+### 3. Cold — no context, STATUS exists
+Empty context, no `./tmp/GRILL.md`, but `./tmp/STATUS.md` exists → summarize from it.
 
 **Freshness guard** — before trusting STATUS, check whether a newer session exists:
 ```bash
@@ -29,7 +36,7 @@ If the last line printed anything (a session newer than STATUS's `mtime` exists)
 guess**: say in Polish „STATUS jest z <Zapisano>, ale jest nowsza sesja — wziąć z niej zamiast
 ze STATUS-u?" and wait for the decision. Otherwise summarize from STATUS.
 
-### 3. Cold — no context and no STATUS
+### 4. Cold — no context, no GRILL and no STATUS
 First **ask for consent** before going to disk, in Polish: „Brak STATUS-u i czysty kontekst —
 zajrzeć do ostatniej sesji?". On consent, find it and read **only the tail** (sessions can be
 >1 MB — don't load the whole file):
