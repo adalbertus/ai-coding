@@ -137,6 +137,10 @@ Pętla bierze **jedno** zadanie, implementuje je, uruchamia feedback loops i com
 Oba zaczynają od **strażnika** (`ralph/preflight.sh`, fail-closed): repo musi mieć w CLAUDE.md
 gotową sekcję `## Ralph`, inaczej pętla halt-uje z instrukcją `/ralph-konfiguracja`.
 
+Oba jadą w **auto mode** (`--permission-mode auto`), czyli agent edytuje pliki, commituje i
+zamyka issues bez pytania Cię o zgodę — granicę wyznacza klasyfikator Claude Code, który odsiewa
+ryzykowne wywołania i prompt injection ([ADR 0007](docs/adr/0007-ralph-auto-mode-zamiast-accept-edits.md)).
+
 ### Kontrakt `## Ralph` (w CLAUDE.md repo)
 
 Prompty są stack-agnostyczne — całą specyfikę repo delegują do sekcji `## Ralph`:

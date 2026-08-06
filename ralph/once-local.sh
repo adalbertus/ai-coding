@@ -17,6 +17,14 @@ commits=$(git log -n 5 --format="%H%n%ad%n%B---" --date=short 2>/dev/null || ech
 # 3. Load the system instructions/persona from the local-files prompt
 prompt=$(cat "$SCRIPT_DIR/prompt-local.md")
 
-# 4. Execute Claude with auto-accept permissions to allow it to edit files autonomously
-claude --permission-mode acceptEdits \
+# 4. Execute Claude in auto mode so the run needs no approvals — see the rationale in once.sh
+#    (acceptEdits covers file edits only, so `git commit` and the feedback loops would hang).
+claude --permission-mode auto \
   "Previous commits: $commits Issues: $issues $prompt"
+
+# Auto mode denies without prompting, so a run that could not finish (e.g. the commit was
+# blocked) now ends quietly. Uncommitted leftovers would poison the NEXT run — say it out loud.
+if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+  echo "⚠️  Ralph zostawił niezacommitowane zmiany w drzewie roboczym."
+  echo "   Sprawdź (git status) i domknij je, zanim odpalisz kolejny przebieg."
+fi

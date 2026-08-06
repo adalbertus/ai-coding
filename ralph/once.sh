@@ -122,5 +122,19 @@ issue=$(gh issue view "$num" --json number,title,body \
 prompt=$(cat "$SCRIPT_DIR/prompt.md")
 
 echo "Zaczynam implementację issue #${num} na ${model}..."
-claude --permission-mode acceptEdits --model "$model" --effort "$effort" \
+# `auto` (not `acceptEdits`): acceptEdits auto-approves file edits ONLY, so every Bash call
+# outside the user's allowlist — `git commit`, `gh issue close`, the ## Ralph feedback loops —
+# still stops for approval, and an AFK loop hangs. Auto mode is Claude Code's default: a
+# classifier vets each tool call for risk and prompt injection, approves the low-risk ones and
+# denies the rest to the model, never to a human. Not `bypassPermissions`: that skips the
+# injection check too, and this loop feeds GitHub issue bodies into an agent running in real
+# repos. See docs/adr/0007-*.
+claude --permission-mode auto --model "$model" --effort "$effort" \
   "Previous commits: $commits Issue to work (work ONLY this one): $issue $prompt"
+
+# Auto mode denies without prompting, so a run that could not finish (e.g. the commit was
+# blocked) now ends quietly. Uncommitted leftovers would poison the NEXT run — say it out loud.
+if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+  echo "⚠️  Ralph zostawił niezacommitowane zmiany w drzewie roboczym."
+  echo "   Sprawdź (git status) i domknij je, zanim odpalisz kolejny przebieg."
+fi
