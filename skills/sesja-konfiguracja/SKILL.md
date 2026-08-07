@@ -32,9 +32,19 @@ Never edit `.gitignore` unasked — it is a tracked file and may be somebody els
 
 ## 2. Write the `## Sesja` section
 
-Into the repo's `CLAUDE.md` (create the file if absent). Level-2 heading exactly `## Sesja`. If
-one already exists, **replace it in place** — never append a duplicate. Verbatim template; it is
-short on purpose, because everything in `CLAUDE.md` is paid for on every single message:
+Into the repo's `CLAUDE.md` (create the file if absent). Level-2 heading exactly `## Sesja` —
+untranslated, it is the skill's name and the anchor for replacing the section later. If one
+already exists, **replace it in place** — never append a duplicate.
+
+**Match the language of the surrounding file**, which varies per repo: check what the existing
+sections (especially `## Ralph`) are written in and pick the template accordingly. A Polish
+paragraph dropped into an English `CLAUDE.md` reads as an oversight and invites someone to
+"fix" it.
+
+Both templates are verbatim, and short on purpose — everything in `CLAUDE.md` is paid for on
+every single message.
+
+### Polish `CLAUDE.md`
 
 ```markdown
 ## Sesja
@@ -51,7 +61,24 @@ jest stratą, nie zyskiem.
   pytania. Zamiast tego `/sesja`, potem `/clear`.
 ```
 
-Do **not** enrich it — no rationale, no pointers into `docs/adr/`, no cross-repo references.
+### English `CLAUDE.md`
+
+```markdown
+## Sesja
+
+Applies to conversations weighing a design, a plan or a decision — with or without a grill. Not
+to implementation runs: their context is verbatim file reads, so clearing it is a loss, not a
+gain.
+
+- When you notice in the visible context that we are returning to something settled or rejected
+  above — or that you are asking the same question twice — stop and propose `/sesja`.
+- This must be an observation of what is visible in the conversation, never an estimate of your
+  own context usage or of how close the limit is. You have no insight into that.
+- Do not propose `/compact` for such a conversation: it loses what was rejected, so it drives
+  the repeated questions. Use `/sesja`, then `/clear`.
+```
+
+Do **not** enrich either — no rationale, no pointers into `docs/adr/`, no cross-repo references.
 `CLAUDE.md` carries instructions only; anything a reader could look up elsewhere is a permanent
 tax on every message in that repo.
 
