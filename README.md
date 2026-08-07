@@ -126,6 +126,20 @@ Zapisano: 2026-08-06 21:15 · Wznowić: grill-with-docs | rozmowa
 Sekcja **Odrzucone** jest tu najważniejsza: to ona ginie w kompakcie i to przez jej brak wznowiona
 sesja z entuzjazmem wraca do wariantu odstrzelonego czterdzieści pytań wcześniej.
 
+### Skill `/sesja-konfiguracja` — raz na repo
+
+`/sesja` działa wszędzie bez konfiguracji, ale nic **nie przypomni** ci o nim: skill jest
+wywoływany tylko jawnie, więc rozmowa wyjeżdża ze smart zone niezauważona do momentu, w którym
+sam sobie o tym przypomnisz — czyli w najgorszej chwili na przypominanie. `/sesja-konfiguracja`
+dopisuje do `CLAUDE.md` repo krótką sekcję `## Sesja`, przez co model sam przerywa i proponuje
+checkpoint, gdy zauważy, że wracacie do sprawy już rozstrzygniętej. Przy okazji sprawdza, czy
+`./tmp/` jest poza gitem.
+
+Sekcja jest w każdym repo praktycznie taka sama — to **dystrybucja**, nie konfiguracja. Sens jest
+w tym, że włączasz ją świadomie tam, gdzie faktycznie deliberujesz, i że siedzi w wersjonowanym
+pliku projektu, a nie w globalnym `~/.claude/CLAUDE.md`, którego `install.sh` nie rozwozi i który
+znika przy przesiadce na inną maszynę.
+
 ## Współdzielony Ralph
 
 Pętla bierze **jedno** zadanie, implementuje je, uruchamia feedback loops i commituje — AFK

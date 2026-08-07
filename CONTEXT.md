@@ -162,6 +162,18 @@ consumed its one-line settled entries as raw material.
 _Avoid_: putting open questions into an ADR (an ADR records rulings — that mismatch is what made
 „zapisz stan" feel hard); calling it a tracker, dziennik or log.
 
+**Sekcja `## Sesja`** (repo reminder):
+The place in a repo's `CLAUDE.md` where the proactivity rule lives, written by
+`/sesja-konfiguracja`. Needed because `/sesja` is explicit-invocation only, so nothing would
+otherwise interrupt a drifting deliberation; `CLAUDE.md` is the one place in context from the
+first message. Near-identical across repos — this is **distribution**, not configuration, and
+the value is that the rule is opt-in per repo and versioned with it. Instructions only: no
+rationale, no ADR pointers (the file is re-read on every message, so anything lookup-able is a
+standing tax).
+_Avoid_: the global `~/.claude/CLAUDE.md` (undistributed, unversioned, and its cross-repo
+pointers dangle); phrasing the rule as a measurement of context usage rather than an observation
+of the visible dialogue.
+
 **Ramka** (framing):
 The argument string `/sesja` builds from `SESJA.md` and passes to `grill-with-docs` when
 resuming a **grill** — the „restart prompt", not a separate artifact. Only needed on that

@@ -79,13 +79,22 @@ o charakterze **przeciwnika**, a nie każda rozmowa o designie.
 - Kasowanie pliku po `/to-prd` jest bezpieczne, bo PRD konsumuje właśnie te wpisy.
 - `/sesja` przesłania `/grill-with-docs` jako punkt wejścia. Bezpośrednie wywołanie dalej
   działa, ale bez ramki i bez wznowienia — i bez ostrzeżenia.
-- **Reguła proaktywności mieszka w globalnym `~/.claude/CLAUDE.md`, świadomie poza tym repo.**
-  W ramce przekazywanej do `grill-with-docs` obowiązywała tylko wewnątrz grilla, czyli nie tam,
-  gdzie brakowało jej najbardziej — w zwykłej rozmowie o designie nic nie przypominało o
-  checkpoincie. Cena: `ai-coding` przestaje być kompletnym źródłem tego zachowania, bo
-  `install.sh` globalnego `CLAUDE.md` nie dystrybuuje. Reguła musi być sformułowana jako
-  **obserwacja widocznego kontekstu** („wracamy do rzeczy uznanej wyżej za zamkniętą"), nigdy
-  jako pomiar własnego zużycia — ten drugi wariant jest odrzucony wyżej i tu obowiązuje tak samo.
+- **Reguła proaktywności trafia do `CLAUDE.md` każdego repo, sekcją `## Sesja`**, pisaną przez
+  `/sesja-konfiguracja` (precedens: `/ralph-konfiguracja` i sekcja `## Ralph`). W ramce
+  przekazywanej do `grill-with-docs` obowiązywała tylko wewnątrz grilla, czyli nie tam, gdzie
+  brakowało jej najbardziej — w zwykłej rozmowie o designie nic nie przypominało o checkpoincie.
+  Reguła musi być sformułowana jako **obserwacja widocznego kontekstu** („wracamy do rzeczy
+  uznanej wyżej za zamkniętą"), nigdy jako pomiar własnego zużycia — ten wariant jest odrzucony
+  wyżej i tu obowiązuje tak samo. Odrzucony wariant pośredni: **globalny `~/.claude/CLAUDE.md`**
+  — nie jest dystrybuowany przez `install.sh`, więc zachowanie znika przy przesiadce na inną
+  maszynę, a wersja odsyłająca po uzasadnienie do `docs/adr/` tego repo wskazuje w próżnię
+  wszędzie, gdzie repo nie jest sklonowane.
+- Sekcja `## Sesja` zawiera **wyłącznie instrukcje** — bez uzasadnień i bez wskaźników do ADR.
+  `CLAUDE.md` jest doliczany do każdej wiadomości w repo, więc treść, którą czytelnik może
+  znaleźć gdzie indziej, jest tam podatkiem stałym.
+- Kontrola, czy `./tmp/` jest poza gitem, przenosi się z pierwszego checkpointu do
+  `/sesja-konfiguracja`: checkpoint odpala się, gdy człowiek jest zmęczony sesją, więc pytania
+  konfiguracyjne trzeba z niego wyjąć.
 - Zakres obejmuje **każdą** sesję deliberacyjną, nie tylko prowadzoną skillem; sesje
   implementacyjne (Ralph) pozostają poza nim.
 - Zysk pojawia się dopiero po `/clear` — sam checkpoint nie zmniejsza okna.

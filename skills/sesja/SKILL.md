@@ -50,9 +50,10 @@ just talks, and reaches for `/sesja` at the first checkpoint.
    test `grill-with-docs` owns). You may *flag* an obvious missing ADR in one sentence.
 4. Never write `./tmp/STATUS.md` — separate skill, separate role (`/zapisz` writes for the
    human; this file is written for the next model).
-   On the **first** checkpoint in a repo, verify the file will stay local:
-   `git check-ignore -q tmp/SESJA.md`. Non-zero → say so in Polish in one line and offer to add
-   `tmp/` to `.gitignore`. Never edit `.gitignore` unasked — it is tracked.
+   If `git check-ignore -q tmp/SESJA.md` fails, say so in Polish in one line and point at
+   `/sesja-konfiguracja` — then carry on. Do **not** offer to edit `.gitignore` here: setup
+   questions belong to setup, and a checkpoint runs when the user is deep in a session and
+   least able to entertain one.
 5. End by telling the user, in Polish, what was saved and to run **`/clear` now** — the
    checkpoint alone does not shrink the window; only clearing does.
 

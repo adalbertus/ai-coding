@@ -6,7 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILLS_DIR="$HOME/.claude/skills"
 BIN_DIR="$HOME/.local/bin"
 
-SKILLS=(zapisz podsumuj sesja ralph-konfiguracja to-issues-ralph)
+SKILLS=(zapisz podsumuj sesja sesja-konfiguracja ralph-konfiguracja to-issues-ralph)
 # launcher:ścieżka-względna-do-skryptu — globalny launcher symlinkuje do skryptu w repo.
 # Skrypty samolokują prompty przez realpath, więc działają z dowolnego repo (cwd).
 LAUNCHERS=("ralph-once:ralph/once.sh" "ralph-once-local:ralph/once-local.sh")
@@ -69,7 +69,7 @@ done
 
 echo
 echo "Gotowe (to instalujesz RAZ, globalnie — nie trzeba powtarzać per repo)."
-echo "  Skille:    /zapisz, /podsumuj, /sesja, /ralph-konfiguracja, /to-issues-ralph"
+echo "  Skille:    /zapisz, /podsumuj, /sesja, /sesja-konfiguracja, /ralph-konfiguracja, /to-issues-ralph"
 echo "  Launchery: ralph-once, ralph-once-local (wymagają $BIN_DIR w PATH)"
 echo
 echo "Następny krok — W KAŻDYM repo, w którym chcesz używać Ralpha:"
