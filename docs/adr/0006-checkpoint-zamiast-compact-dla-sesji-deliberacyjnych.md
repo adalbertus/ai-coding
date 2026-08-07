@@ -25,17 +25,29 @@ Stan rozdzielony na dwa pojemniki, bo mają różną trwałość i różny forma
 | artefakt | zawartość | trwałość |
 |---|---|---|
 | `CONTEXT.md` / `docs/adr/` | to, co **rozstrzygnięte** | trwałe, commitowane |
-| `./tmp/GRILL.md` | to, co **otwarte** (+ odrzucone + słownik) | efemeryczne, kasowane po domknięciu |
+| `./tmp/SESJA.md` | to, co **otwarte** (+ odrzucone + słownik) | efemeryczne, kasowane po domknięciu |
 
 Rozdział rozwiązuje konkretną trudność: opór przy „zapisz stan" nie brał się z niedomkniętej
 sesji, tylko z próby wpisania **otwartych pytań do dokumentu, który jest zapisem rozstrzygnięć**.
 ADR nie ma miejsca na „nie wiemy jeszcze, czy XLS czy XLSX, i od tego zależy wybór biblioteki".
 Przy dwóch pojemnikach każda rzecz ma gdzie trafić.
 
-Obsługuje to jeden skill `/grilluj` — punkt wejścia dla startu tematu, checkpointu i wznowienia.
-Jest **cienkim wrapperem**: woła `grill-with-docs`, nie powiela go (precedens: `to-issues-ralph`
-nad `to-issues`). Przy wznowieniu przekazuje **ramkę** w argumentach, bo `grill-with-docs` bez
-niej przechodzi gałęzie od góry i odpytuje rzeczy ustalone.
+Obsługuje to jeden skill `/sesja` — punkt wejścia dla startu tematu, checkpointu, wznowienia
+i domknięcia. Jest **cienkim wrapperem**: woła `grill-with-docs`, nie powiela go (precedens:
+`to-issues-ralph` nad `to-issues`). Przy wznowieniu grilla przekazuje **ramkę** w argumentach,
+bo `grill-with-docs` bez niej przechodzi gałęzie od góry i odpytuje rzeczy ustalone.
+
+**Nowelizacja (2026-08-07): granicą jest oś deliberacja/implementacja, nie obecność grilla.**
+Skill nazywał się pierwotnie `/grilluj`, a plik stanu `./tmp/GRILL.md` — niezgodnie z zakresem
+ustalonym niżej w Konsekwencjach („każda sesja deliberacyjna, nie tylko prowadzona skillem").
+Etykieta „grillowanie" trafiła tu dlatego, że tam ta potrzeba boli najczęściej, a nie dlatego,
+że zbadano i odrzucono rozmowy bez grilla. Nazwy idą więc za obiektem, który skill **ratuje**
+(sesję), a nie za tym, który **kasuje** (kontekst) — stąd odrzucona kandydatura `/kontekst`,
+myląca się dodatkowo z `CONTEXT.md`, czyli pojemnikiem na rzeczy rozstrzygnięte. Grill pozostaje
+domyślnym wejściem w **nowy** temat (świeży temat najwięcej zyskuje na bezlitosnym odpytywaniu),
+ale przestaje definiować zakres; pole `Wznowić: grill-with-docs | rozmowa` niesie tę różnicę
+między oknami kontekstu. Przy okazji doostrzono słownik: **grillowanie** to sesja deliberacyjna
+o charakterze **przeciwnika**, a nie każda rozmowa o designie.
 
 ## Rozważane opcje
 
@@ -51,18 +63,29 @@ niej przechodzi gałęzie od góry i odpytuje rzeczy ustalone.
   ma wglądu we własne zużycie, więc wyprodukuje konfabulację; a przesuwanie progu to zamiana
   jednego zgadywania na inne. Moment checkpointu wyznacza **granica decyzji** albo zauważone
   powtórzone pytanie — nie licznik.
+- **Autoodpalanie skilla** (zdjęcie `disable-model-invocation`) — odrzucone: skill zapisuje pliki
+  i każe zrobić `/clear`, więc uruchomiony samoczynnie w środku myśli jest inwazyjny, a
+  autodetekcja trybu trafiłaby wtedy w „checkpoint", kiedy człowiek chciał tylko dokończyć zdanie.
+  Spust zostaje u człowieka; przypomnienie idzie osobno (zob. Konsekwencje).
 - **Jeden plik stanu na temat** (`grill-<slug>.md`) — odrzucone: jeden grill na repo, zgodnie
   z zasadą przyjętą już dla `./tmp/STATUS.md` („don't pile up files"). Slug wymagałby stabilnego
   odtwarzania między checkpointami i wyboru spośród wielu plików przy wznowieniu.
 
 ## Konsekwencje
 
-- `./tmp/GRILL.md` trzyma także **treść**, nie tylko wskaźniki: decyzje rozstrzygnięte, które nie
+- `./tmp/SESJA.md` trzyma także **treść**, nie tylko wskaźniki: decyzje rozstrzygnięte, które nie
   przechodzą sita ADR ani nie są terminami, nie mają innego domu. Ta klasa jest liczniejsza niż
   obie trwałe razem.
 - Kasowanie pliku po `/to-prd` jest bezpieczne, bo PRD konsumuje właśnie te wpisy.
-- `/grilluj` przesłania `/grill-with-docs` jako punkt wejścia. Bezpośrednie wywołanie dalej
+- `/sesja` przesłania `/grill-with-docs` jako punkt wejścia. Bezpośrednie wywołanie dalej
   działa, ale bez ramki i bez wznowienia — i bez ostrzeżenia.
+- **Reguła proaktywności mieszka w globalnym `~/.claude/CLAUDE.md`, świadomie poza tym repo.**
+  W ramce przekazywanej do `grill-with-docs` obowiązywała tylko wewnątrz grilla, czyli nie tam,
+  gdzie brakowało jej najbardziej — w zwykłej rozmowie o designie nic nie przypominało o
+  checkpoincie. Cena: `ai-coding` przestaje być kompletnym źródłem tego zachowania, bo
+  `install.sh` globalnego `CLAUDE.md` nie dystrybuuje. Reguła musi być sformułowana jako
+  **obserwacja widocznego kontekstu** („wracamy do rzeczy uznanej wyżej za zamkniętą"), nigdy
+  jako pomiar własnego zużycia — ten drugi wariant jest odrzucony wyżej i tu obowiązuje tak samo.
 - Zakres obejmuje **każdą** sesję deliberacyjną, nie tylko prowadzoną skillem; sesje
   implementacyjne (Ralph) pozostają poza nim.
 - Zysk pojawia się dopiero po `/clear` — sam checkpoint nie zmniejsza okna.

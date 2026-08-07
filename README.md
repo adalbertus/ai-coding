@@ -61,9 +61,9 @@ w sekcji `## Ralph` każdego z nich. `install.sh` z Etapu 1 nie był tu powtarza
 - **`/zapisz`** — na granicy fazy zapisuje minimalny wskaźnik pozycji do `./tmp/STATUS.md`
   (gdzie skończyłem + następny krok). Nie przepisuje pracy — ta siedzi w artefaktach (PRD, issues).
 - **`/podsumuj`** — na żądanie daje 2–3 zdania „gdzie jestem + następny krok", sam dobierając
-  źródło: żywy kontekst (**ciepło**) → `./tmp/GRILL.md` → `./tmp/STATUS.md` (**zimno**) →
-  ostatni transkrypt sesji (za zgodą). Niedomknięty grill bije STATUS — jest nowszy z definicji
-  i konkretniejszy.
+  źródło: żywy kontekst (**ciepło**) → `./tmp/SESJA.md` → `./tmp/STATUS.md` (**zimno**) →
+  ostatni transkrypt sesji (za zgodą). Niedomknięta sesja bije STATUS — jest nowsza z definicji
+  i konkretniejsza.
 
 Oba wołane są **tylko jawnie** (`disable-model-invocation`) — nie odpalą się same.
 
@@ -81,30 +81,32 @@ Zapisano: 2026-06-25 15:59
 `./tmp/` jest poza gitem (zob. `.gitignore`) — STATUS jest lokalny per maszyna; przy jednym
 wątku na repo i jednej maszynie to wystarcza.
 
-## Skill `/grilluj`
+## Skill `/sesja`
 
-Punkt wejścia do sesji projektowych, żeby **nie kompaktować** długiego grilla. Kompakt gubi to,
-co **odrzucone**, więc sesja wraca do zamkniętych gałęzi i pyta drugi raz o to samo — jedna sesja
-zjadła 6 kompaktów po ~100k za zero produktu pracy. Zamiast tego: rozstrzygnięcia lądują
-w `CONTEXT.md`/ADR, otwarte w `./tmp/GRILL.md`, a kontekst czyścisz `/clear`-em. Zob.
+Punkt wejścia do sesji projektowych, żeby **nie kompaktować** długiej deliberacji. Kompakt gubi
+to, co **odrzucone**, więc sesja wraca do zamkniętych gałęzi i pyta drugi raz o to samo — jedna
+sesja zjadła 6 kompaktów po ~100k za zero produktu pracy. Zamiast tego: rozstrzygnięcia lądują
+w `CONTEXT.md`/ADR, otwarte w `./tmp/SESJA.md`, a kontekst czyścisz `/clear`-em. Zob.
 `docs/adr/0006`.
 
 ```bash
-/grilluj <temat>     # start
-/grilluj             # w trakcie → checkpoint, potem /clear
-/grilluj             # po /clear → wznowienie od następnej otwartej gałęzi
-/grilluj domknięte   # koniec → kasuje GRILL.md, wskazuje /to-prd
+/sesja <temat>     # start — nowy temat otwiera się grillem
+/sesja             # w trakcie → checkpoint, potem /clear
+/sesja             # po /clear → wznowienie od następnej otwartej gałęzi
+/sesja domknięte   # koniec → kasuje SESJA.md, wskazuje /to-prd
 ```
 
-Tryb rozpoznaje po tym, **czy w kontekście jest sesja grillowania** — nie po istnieniu pliku.
-Sam grill prowadzi skill `grill-with-docs`, wołany (nigdy kopiowany). Dotyczy **każdej** sesji
-deliberacyjnej, także takiej bez skilla; sesje implementacyjne (Ralph) są poza zakresem —
-tam kontekst to dosłowne odczyty plików i czyszczenie go jest stratą, nie zyskiem.
+Tryb rozpoznaje po tym, **czy w kontekście jest dialog deliberacyjny** — nie po istnieniu pliku.
+Zakres wyznacza oś **deliberacja vs implementacja**, nie obecność grilla: zwykła rozmowa
+o designie liczy się tak samo, a plik zapamiętuje w polu `Wznowić`, czym była, żeby wznowić ją
+tak samo. Grill, gdy jest, prowadzi skill `grill-with-docs`, wołany (nigdy kopiowany). Sesje
+implementacyjne (Ralph) są poza zakresem — tam kontekst to dosłowne odczyty plików i czyszczenie
+go jest stratą, nie zyskiem.
 
-### Format `./tmp/GRILL.md`
+### Format `./tmp/SESJA.md`
 
 ```markdown
-# Grill: <temat>
+# Sesja: <temat>
 Zapisano: 2026-08-06 21:15 · Wznowić: grill-with-docs | rozmowa
 
 ## Ustalone

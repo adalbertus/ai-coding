@@ -8,7 +8,7 @@ jednozadaniowa implementacja). Decyzje projektowe: `docs/adr/`.
 
 Dwa skille, które pomagają wrócić do **jednego wątku pracy na repo**. `/zapisz` zapisuje na
 granicy fazy mały wskaźnik pozycji; `/podsumuj` daje 2–3 zdaniowy readout „gdzie jestem +
-następny krok", dobierając źródło warstwowo (żywy kontekst → GRILL → STATUS → ostatni transkrypt).
+następny krok", dobierając źródło warstwowo (żywy kontekst → SESJA → STATUS → ostatni transkrypt).
 Zob. `docs/adr/0001`, `docs/adr/0006`.
 
 **Podsumowanie** (summary):
@@ -121,18 +121,28 @@ never at triage.
 AFK = a task fit to run unsupervised (label `ready-for-agent`); HITL = one needing a human
 decision (won't carry the label). The selektor and worker only touch AFK tasks.
 
-## Grillowanie (`/grilluj`)
+## Sesja deliberacyjna (`/sesja`)
 
-Punkt wejścia do sesji projektowych: start tematu, checkpoint, wznowienie po `/clear`.
-Cienki wrapper — grillowanie prowadzi cudzy `grill-with-docs`. Zob. `docs/adr/0006`.
+Punkt wejścia do sesji projektowych: start tematu, checkpoint, wznowienie po `/clear`,
+domknięcie. Cienki wrapper — samo grillowanie prowadzi cudzy `grill-with-docs`.
+Zob. `docs/adr/0006`.
+
+**Sesja deliberacyjna** (deliberative session):
+The scope of `/sesja`: any working conversation whose context is mostly **deliberation** —
+proposals, counter-arguments, variants killed along the way, i.e. spent fuel. The opposite
+pole is an **implementation** run, whose context is verbatim file reads that must survive
+intact; there a checkpoint is a loss, not a gain. That axis — deliberation vs implementation —
+is the only one that bounds `/sesja`. Whether `grill-with-docs` was involved does not.
+_Avoid_: naming this scope „grillowanie" (that is one kind of it, not the whole).
 
 **Grillowanie** (grilling):
-The *class of activity*, not a particular skill call: structured interrogation of one's own
-design — proposals, counter-arguments, variants killed along the way. A `grill-with-docs`
-session and an unaided design argument both count. Its context is **deliberation**, which is
-why a checkpoint pays off here but not in an implementation run, whose context is verbatim
-file reads that must survive intact.
-_Avoid_: using it as a synonym for „wywołanie `grill-with-docs`".
+The **adversarial** kind of deliberative session, not a particular skill call: structured
+interrogation of one's own design. A `grill-with-docs` session and an equally adversarial
+unaided argument both count; an ordinary weighing-of-options conversation does not — that is
+the wider sesja deliberacyjna. The commonest way to leave the smart zone, which is why
+`/sesja` offers a grill as the default entry into a **new** topic.
+_Avoid_: using it as a synonym for „wywołanie `grill-with-docs`", or as the name for the scope
+of `/sesja`.
 
 **Smart zone**:
 The region in which a session still works well. Deliberately **not a number**: a hunch the
@@ -142,9 +152,9 @@ is clean and unhealthy at 90k when it is thick with failed attempts — the vari
 own usage); the human does.
 _Avoid_: a token threshold; equating it with window size or with „dużo kontekstu".
 
-**Plik stanu grillowania** (`./tmp/GRILL.md`):
+**Plik stanu sesji** (`./tmp/SESJA.md`):
 The ephemeral container for what is still **open**, complementing `CONTEXT.md`/ADR, which hold
-what is **settled**. One per repo (one grill at a time), gitignored, ~30 lines — a list, not
+what is **settled**. One per repo (one session at a time), gitignored, ~30 lines — a list, not
 prose. Holds: *settled* (pointers into ADR/`CONTEXT.md`, **plus** one-line entries for decisions
 too small to file durably), *open* branches in order, *rejected* variants **with reasons**, the
 sharpened glossary, and how to resume. Deleted when the topic closes — by then `/to-prd` has
@@ -153,8 +163,10 @@ _Avoid_: putting open questions into an ADR (an ADR records rulings — that mis
 „zapisz stan" feel hard); calling it a tracker, dziennik or log.
 
 **Ramka** (framing):
-The argument string `/grilluj` builds from `GRILL.md` and passes to `grill-with-docs` when
-resuming — the „restart prompt", not a separate artifact. Required, not decorative:
+The argument string `/sesja` builds from `SESJA.md` and passes to `grill-with-docs` when
+resuming a **grill** — the „restart prompt", not a separate artifact. Only needed on that
+branch; a `Wznowić: rozmowa` resume delegates to nobody, so it frames nobody. Required where
+it applies, and not decorative:
 `grill-with-docs` says *„interview me relentlessly about **every** aspect… walk down **each**
 branch"*, so an unframed resume re-opens settled ground. Always in the **arguments**, never in
 the wrapper body — arguments land last and win by recency.
