@@ -121,6 +121,15 @@ never at triage.
 AFK = a task fit to run unsupervised (label `ready-for-agent`); HITL = one needing a human
 decision (won't carry the label). The selektor and worker only touch AFK tasks.
 
+**PRD** (product requirements doc):
+In this repo, an **ephemeral** synthesis of a finished grill, produced only as input to the
+issue breakdown and materialized **in-session** (in context) — never published to the tracker,
+never written to a file, and never read again after breakdown. Its value is entirely up-front:
+it denoises a long grill session into a clean one-page input and supplies the exhaustive
+user-story list the breakdown uses as a coverage checklist. Zob. `docs/adr/0008`.
+_Avoid_: treating it as a durable artifact, a published parent issue, a `tmp/` file, or a spec
+anyone reads later.
+
 ## Sesja deliberacyjna (`/sesja`)
 
 Punkt wejścia do sesji projektowych: start tematu, checkpoint, wznowienie po `/clear`,

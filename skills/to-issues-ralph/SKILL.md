@@ -1,30 +1,43 @@
 ---
 name: to-issues-ralph
-description: Break a plan into Ralph-loop issues — runs the standard to-issues breakdown, then triages each published issue's complexity so the loop can pick a model. Use when converting a plan/PRD into issues that the Ralph autonomous loop (ralph/once.sh) will implement, or when the user mentions Ralph, complexity triage, or per-issue model selection.
+description: Turn a finished grill into triaged, published Ralph-loop issues in one non-interactive run — synthesizes an ephemeral PRD, breaks it into vertical slices, adds manual-verification and complexity triage, then publishes. Asks no questions and publishes no PRD. Use after a grill session to convert a plan/PRD into issues the Ralph autonomous loop (ralph/once.sh) will implement, or when the user mentions Ralph, complexity triage, or per-issue model selection.
 ---
 
 # To Issues (Ralph)
 
-Thin wrapper over the `to-issues` skill. It does not reimplement the breakdown — it
-**delegates** to `to-issues`, then adds one step: tagging each published issue with a
-`complexity:*` label so `ralph/once.sh` can choose the model to run it on.
+Runs the whole post-grill chain **non-interactively**: synthesize an ephemeral PRD →
+break it into vertical slices → add manual verification + complexity triage → publish.
+It asks no questions and publishes no PRD.
 
-Delegating (not copying) means upstream changes to `to-issues` keep working here.
+It does not reimplement PRD synthesis or breakdown — it **delegates** to `to-prd` and
+`to-issues`, wrapping each call with an override that suppresses their interactive
+checkpoints. Delegating (not copying) means upstream changes keep working here.
 
 ## Workflow
 
-0. **Prefix the parent PRD issue.** If the source is an existing GitHub issue (the PRD),
-   rename it to add a `[PRD]` prefix — unless the title already starts with `[PRD]`:
-   ```bash
-   gh issue edit <prd-n> --title "[PRD] $(gh issue view <prd-n> --json title -q .title)"
-   ```
+1. **Synthesize an ephemeral PRD.** Invoke the `to-prd` skill with this override:
+   > Run `to-prd` **non-interactively**: skip its step-2 human check on modules/tests —
+   > make the module and test-target calls yourself from the grill context. **Do NOT
+   > publish** the PRD to the issue tracker and do NOT apply `ready-for-agent`, and do
+   > NOT write it to a file; instead materialize the full PRD **into your response**. It
+   > stays in context as breakdown input only. This countermands `to-prd`'s step 3 (publish).
 
-1. **Run the standard breakdown.** Invoke the `to-issues` skill and let it draft, quiz,
-   and publish the vertical-slice issues exactly as usual (it applies the AFK triage
-   label itself). Do not duplicate or alter that process.
-   Prefix every issue title with `[ISSUE]` (e.g. `[ISSUE] Add user login`).
+   Why: the PRD denoises a long grill session into a clean one-page breakdown input and
+   supplies the exhaustive user-story list the breakdown uses as a coverage checklist. It
+   is never published because `ralph/once.sh` filters `[PRD]` issues out anyway; it is not
+   filed because everything runs in one session, so context is the input the next step reads
+   (a file would only re-enter context on read, saving nothing) — see ADR 0008.
 
-2. **Add manual verification steps.** For each published issue, edit its body to append
+2. **Run the breakdown non-interactively.** Invoke the `to-issues` skill with this override:
+   > Run `to-issues` **non-interactively** from the PRD synthesized in step 1 (already in
+   > context — do not look for a file). Do NOT perform its step 4 (Quiz the user) and do NOT
+   > wait for approval — treat the breakdown as approved and proceed straight to publishing.
+   > This countermands `to-issues`' "Iterate until the user approves."
+
+   It applies the AFK triage label itself. Prefix every issue title with `[ISSUE]`
+   (e.g. `[ISSUE] Add user login`).
+
+3. **Add manual verification steps.** For each published issue, edit its body to append
    a `## Jak sprawdzić ręcznie` section — a brief, concrete list (3–5 bullets) showing
    the golden path a human can follow to confirm the slice works. Skip only for pure
    documentation/config changes with nothing observable.
@@ -38,7 +51,7 @@ Delegating (not copying) means upstream changes to `to-issues` keep working here
    - krok 2"
    ```
 
-3. **Triage complexity.** After adding verification steps, add **exactly one**
+4. **Triage complexity.** After adding verification steps, add **exactly one**
    `complexity:*` label to each issue, using the rubric below. Create the label first if
    the repo lacks it:
    ```bash
@@ -48,7 +61,7 @@ Delegating (not copying) means upstream changes to `to-issues` keep working here
    gh issue edit <n> --add-label complexity:<tier>
    ```
 
-4. **Record why (heavy only).** For a `complexity:heavy` issue, add one line to its body
+5. **Record why (heavy only).** For a `complexity:heavy` issue, add one line to its body
    stating why (e.g. "heavy — touches tenant-isolation logic"), for the human reader who
    picks it up weeks later.
 
