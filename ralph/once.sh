@@ -109,7 +109,7 @@ complexity=$(gh issue view "$num" --json labels \
 complexity="${complexity:-normal}"
 
 case "$complexity" in
-  heavy)   model="opus";   effort="high"   ;;
+  heavy)   model="claude-opus-4-8"; effort="high"   ;;
   trivial) model="haiku";  effort="medium" ;;
   *)       model="sonnet"; effort="medium" ;; # 'normal' + anything unexpected
 esac
