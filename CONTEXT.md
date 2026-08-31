@@ -1,6 +1,6 @@
 # ai-coding — słownik projektu
 
-Repo z osobistym toolingiem do Claude Code, dystrybuowanym symlinkami przez `install.sh`.
+Repo z osobistym toolingiem do pracy z agentami kodującymi, dystrybuowanym symlinkami przez `install.sh`.
 Dwa obszary: **wznawianie pracy** (`/zapisz`, `/podsumuj`) i **pętla Ralpha** (autonomiczna,
 jednozadaniowa implementacja). Decyzje projektowe: `docs/adr/`.
 
@@ -60,6 +60,19 @@ launched from the terminal without supervision (AFK). Two flavours: GitHub-backe
 local (`issues/*.md`, single fixed model).
 _Avoid_: agent, automat, bot.
 
+**Runtime agenta** (agent runtime):
+The agent CLI family selected for one Ralph run. The runtime owns every model-backed step in
+that run — selector, preflight guard, and worker — so `ralph-once codex` means a Codex run and
+`ralph-once claude` means a Claude run. The runtime choice must not change the task semantics.
+_Avoid_: using it to mean only the worker, or mixing selector/guard from one runtime with a
+worker from another without saying so explicitly. Zob. `docs/adr/0009`.
+
+**Adapter runtime’u** (runtime adapter):
+The narrow translation layer between Ralph's shared concepts and a concrete CLI: command flags,
+model selection, approval/sandbox mode, and prompt vocabulary. It adapts invocation mechanics;
+it does not own task policy, done-criteria, labels, or repo-specific testing rules.
+_Avoid_: copying the whole Ralph implementation per agent.
+
 **Worker**:
 The model run that actually implements the selected task (explores, `/tdd`, commits). Distinct
 from the **selektor** (only picks the next task) and the **strażnik** (only gates).
@@ -85,10 +98,18 @@ section, then a cheap Haiku check that it actually holds runnable instructions. 
 loop refuses to start and points to `/ralph-konfiguracja`. Never guesses how to test.
 _Avoid_: walidacja, check.
 
-**Sekcja `## Ralph`** (repo contract):
-The place in a repo's `CLAUDE.md` where it declares its own way of working: the feedback loops
-to run before a commit (required) and the done-criteria. The ONLY place stack-specific
-differences live; the shared prompts stay stack-agnostic and delegate to it.
+**Kontrakt agenta** (agent contract):
+The runtime-native repo instructions that declare the repo's way of working. For Ralph, the
+contract is the `## Ralph` section mirrored into the native files the selected runtime reads
+(for example `CLAUDE.md` and `AGENTS.md`). The contract contains feedback loops to run before a
+commit and done-criteria; it is the ONLY place stack-specific differences live.
+_Avoid_: treating `CLAUDE.md` as the conceptual source of truth once multiple runtimes are
+supported.
+
+**Sekcja `## Ralph`** (Ralph contract section):
+The part of the agent contract where a repo declares its own way of working for Ralph: the
+feedback loops to run before a commit (required) and the done-criteria. The shared prompts stay
+stack-agnostic and delegate to it.
 
 **Done-criteria** (kryteria ukończenia):
 The condition under which a task counts as finished: whether the automated gate can prove it
