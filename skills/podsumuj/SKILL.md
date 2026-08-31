@@ -1,10 +1,10 @@
 ---
 name: podsumuj
-description: Gives a 2–3 sentence readout of "where I am + next step", picking its source: live context → ./tmp/SESJA.md → ./tmp/STATUS.md → last session transcript. Invoked only explicitly via /podsumuj.
+description: "Gives a 2–3 sentence readout of where I am + next step, picking its source: live context → ./tmp/SESJA.md → ./tmp/STATUS.md → prior session transcript when discoverable. Invoked explicitly via /podsumuj or $podsumuj."
 disable-model-invocation: true
 ---
 
-# /podsumuj — where I stopped + next step
+# /podsumuj / $podsumuj — where I stopped + next step
 
 Give **2–3 sentences in Polish**: where the work stands and what the next step is. Not a full
 recap — orient on **position**. End with a light offer to start ("Ruszamy?"). See `CONTEXT.md`.
@@ -18,14 +18,16 @@ invocation) → **summarize it**. Don't touch any files.
 ### 2. Cold — no context, SESJA exists
 Empty context but `./tmp/SESJA.md` exists → an unfinished session outranks STATUS: it is both newer
 by construction and more specific. Read it and say, in Polish, what the topic is and how many
-branches are still open, with **`/sesja`** as the next step. Don't dump the file — 2–3 sentences,
+branches are still open, with the **sesja skill** as the next step. Don't dump the file — 2–3 sentences,
 same as always. (This covers *returning after a break*; right after a checkpoint the user types
-`/sesja` directly and never gets here.)
+the sesja skill directly and never gets here.)
 
 ### 3. Cold — no context, STATUS exists
 Empty context, no `./tmp/SESJA.md`, but `./tmp/STATUS.md` exists → summarize from it.
 
-**Freshness guard** — before trusting STATUS, check whether a newer session exists:
+**Freshness guard (Claude Code only)** — before trusting STATUS, check whether a newer Claude
+session exists. In Codex or any runtime without a discoverable session transcript path, skip this
+guard and summarize from STATUS:
 ```bash
 SID="$CLAUDE_CODE_SESSION_ID"
 DIR=$(dirname "$(find ~/.claude/projects -name "$SID.jsonl" 2>/dev/null | head -1)")
@@ -38,8 +40,8 @@ ze STATUS-u?" and wait for the decision. Otherwise summarize from STATUS.
 
 ### 4. Cold — no context, no SESJA and no STATUS
 First **ask for consent** before going to disk, in Polish: „Brak STATUS-u i czysty kontekst —
-zajrzeć do ostatniej sesji?". On consent, find it and read **only the tail** (sessions can be
->1 MB — don't load the whole file):
+zajrzeć do ostatniej sesji, jeśli ten runtime ją udostępnia?". On consent, find it and read
+**only the tail** (sessions can be >1 MB — don't load the whole file). For Claude Code:
 ```bash
 SID="$CLAUDE_CODE_SESSION_ID"
 DIR=$(dirname "$(find ~/.claude/projects -name "$SID.jsonl" 2>/dev/null | head -1)")
@@ -48,13 +50,14 @@ PREV=$(ls -t "$DIR"/*.jsonl 2>/dev/null | grep -v "/$SID.jsonl" | head -1)
 ```
 Skip the noise (tool results), pick out the last exchanges, and summarize.
 
-If there is **no prior session at all** (`PREV` empty) → say plainly, in Polish: „Nie ma czego
-streszczać — brak STATUS-u i brak wcześniejszej sesji w tym repo." Don't make things up.
+If there is **no prior session at all** (`PREV` empty), or the current runtime does not expose a
+session transcript location you can safely inspect → say plainly, in Polish: „Nie ma czego
+streszczać — brak STATUS-u i brak dostępnej wcześniejszej sesji w tym repo." Don't make things up.
 
 ## Output
 
 - Polish, 2–3 sentences, **position + next step** (not a recap).
-- Prefer naming the next step as a **command** — if the repo pipeline (prose in `CLAUDE.md`)
-  names one; otherwise free text.
+- Prefer naming the next step as a **command/skill** — if the repo pipeline (prose in `CLAUDE.md`
+  or `AGENTS.md`) names one; otherwise free text.
 - When cold, **tag the source**: „(ze STATUS-u / z poprzedniej sesji; bieżąca sesja jest czysta)".
 - End with a light „Ruszamy?".

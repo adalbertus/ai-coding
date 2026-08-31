@@ -1,15 +1,16 @@
 ---
 name: ralph-konfiguracja
-description: One-time HITL setup that makes a repo runnable by the shared Ralph loop. Detects the stack, writes a usable "## Ralph" section (feedback loops + done-criteria + commit conventions) into the repo's CLAUDE.md, creates the GitHub labels the loop relies on, and proposes rewording any CLAUDE.md instruction that makes agents read a large reference file wholesale. Run it in a Claude session on Sonnet or better. Invoked only explicitly via /ralph-konfiguracja (the preflight strażnik points the user here when the section is missing).
+description: One-time HITL setup that makes a repo runnable by the shared Ralph loop. Detects the stack, writes a usable "## Ralph" section (feedback loops + done-criteria + commit conventions) into the repo's native agent contract files (CLAUDE.md and AGENTS.md), creates the GitHub labels the loop relies on, and proposes rewording any agent-contract instruction that makes agents read a large reference file wholesale. Run it in a capable agent session. Invoked explicitly via /ralph-konfiguracja or $ralph-konfiguracja (the preflight strażnik points the user here when the section is missing).
 disable-model-invocation: true
 ---
 
-# /ralph-konfiguracja — make this repo runnable by Ralph
+# /ralph-konfiguracja / $ralph-konfiguracja — make this repo runnable by Ralph
 
 The shared loop (`ralph-once` / `ralph-once-local`) is stack-agnostic. Before it will run in a
-repo, a **preflight strażnik** (`ralph/preflight.sh`) requires that repo's `CLAUDE.md` to carry
-a usable `## Ralph` section declaring **how to test** and **what "done" means**. This skill
-writes that section, once, per repo.
+repo, a **preflight strażnik** (`ralph/preflight.sh`) requires that repo's selected runtime
+contract file (`CLAUDE.md` for Claude, `AGENTS.md` for Codex) carry a usable `## Ralph` section
+declaring **how to test** and **what "done" means**. This skill writes the same section into
+both files, once, per repo.
 
 This is deliberately a **human-in-the-loop** task on a capable model — the test commands and
 done-criteria are repo-judgment, not something to autogenerate blindly. Confirm each piece with
@@ -18,12 +19,14 @@ the user before writing.
 ## What it produces
 
 1. A `## Ralph` section in the repo's `CLAUDE.md` (created if the file is absent), with the
-   parts the strażnik checks for — **feedback loops** + **done-criteria** (required) — plus
-   **commit conventions** and **doc-sync** (both recommended; doc-sync only if the repo keeps
-   durable docs it can invalidate).
+   same section mirrored into `AGENTS.md` (created if absent). It contains the parts the
+   strażnik checks for — **feedback loops** + **done-criteria** (required) — plus **commit
+   conventions** and **doc-sync** (both recommended; doc-sync only if the repo keeps durable docs
+   it can invalidate).
 2. The GitHub labels the loop relies on — **only** for GitHub-backed repos.
-3. Where it applies: a **reworded** instruction elsewhere in that CLAUDE.md, so agents consult
-   large reference files instead of reading them whole (proposed to the user, never silent).
+3. Where it applies: a **reworded** instruction elsewhere in `CLAUDE.md` / `AGENTS.md`, so agents
+   consult large reference files instead of reading them whole (proposed to the user, never
+   silent).
 
 ## Workflow
 
@@ -40,7 +43,7 @@ Do not guess. Inspect the repo and confirm the commands actually exist:
   "run before commit" commands.
 
 Propose the exact command list and have the user confirm. These must be **runnable as-is** —
-the strażnik's Haiku gate marks the section MISSING if the loops are vague or placeholder.
+the strażnik's model gate marks the section MISSING if the loops are vague or placeholder.
 
 ### 2. Decide the done-criteria
 
@@ -83,9 +86,11 @@ repo has no special convention, you may omit this part — the prompt has a sens
 
 ### 5. Write the `## Ralph` section
 
-Create `CLAUDE.md` if missing. If a `## Ralph` section already exists, **replace it in place**
-(don't append a duplicate). Use a level-2 heading exactly `## Ralph` — the strażnik greps for
-it. Sub-sections use `###` (they stay inside the section). Template:
+Create `CLAUDE.md` and `AGENTS.md` if missing. If a `## Ralph` section already exists in either
+file, **replace it in place** (don't append a duplicate). Use a level-2 heading exactly
+`## Ralph` — the strażnik greps for it. Sub-sections use `###` (they stay inside the section).
+The section content should be the same in both files unless the repo has a documented reason to
+diverge. Template:
 
 ```markdown
 ## Ralph
@@ -144,11 +149,12 @@ gh label create complexity:trivial --color 0E8A16 --description "Cheapest model 
 
 ### 7. Reword instructions that force whole-file reads (outside `## Ralph`)
 
-The rest of this repo's CLAUDE.md often carries a line like *"`CONTEXT.md` — read before
-introducing a new term"*. A worker obeys it literally: a full `Read` of a 68 KB glossary is
-~25k tokens, spent before it writes a line of code, and it stays in context for the whole run.
-`ralph/prompt.md` tells the worker to search rather than read, but an instruction in CLAUDE.md
-saying "read" outranks it in the worker's eyes — so fix the source instead of arguing with it.
+The rest of this repo's `CLAUDE.md` or `AGENTS.md` often carries a line like *"`CONTEXT.md` —
+read before introducing a new term"*. A worker obeys it literally: a full `Read` of a 68 KB
+glossary is ~25k tokens, spent before it writes a line of code, and it stays in context for the
+whole run. `ralph/prompt.md` tells the worker to search rather than read, but an instruction in a
+native agent contract saying "read" outranks it in the worker's eyes — so fix the source instead
+of arguing with it.
 
 Only worth doing where the pointed-at file is genuinely large (rule of thumb: **>20 KB**). Below
 that the exploration protocol handles it anyway and the reword is noise.
@@ -158,13 +164,13 @@ that the exploration protocol handles it anyway and the reword is noise.
 2. **Also check directories pointed at as a whole** (`docs/adr/`, `docs/`) — thirty small ADRs
    are individually harmless and collectively 100 KB, which the per-file threshold misses.
    `du -ck docs/adr/*.md | tail -1`.
-3. Grep CLAUDE.md for instructions that point at any of them. The verb need not be `read` —
+3. Grep `CLAUDE.md` and `AGENTS.md` for instructions that point at any of them. The verb need not be `read` —
    `refer to`, `see`, `czytaj`, `zapoznaj się`, or a "Read these first" heading all produce the
    same wholesale `Read`. What matters is that the line names a large target and gives no hint
    that consulting a part of it is enough.
 4. **Propose** the reword to the user — show the old line and the new one, and let them accept.
-   Never rewrite parts of CLAUDE.md outside `## Ralph` without confirmation; this is the one
-   step where this skill touches somebody else's prose. Pattern:
+   Never rewrite parts of native agent contract files outside `## Ralph` without confirmation;
+   this is the one step where this skill touches somebody else's prose. Pattern:
 
    > `CONTEXT.md` — ~~read~~ **consult it (grep for the term)** before introducing a new term.
    > It is a glossary: look terms up, don't read it end to end.
@@ -174,12 +180,13 @@ Skip the step entirely when the repo has no large reference file. See `docs/adr/
 ### 8. Hand back
 
 Tell the user in one or two Polish sentences what was written and what is next: that
-`ralph-once` (or `ralph-once-local`) will now pass the strażnik in this repo, and that issues
-get triaged with `/to-issues-ralph`. Mention the reword from step 7 only if one was made.
+`ralph-once claude` / `ralph-once codex` (or `ralph-once-local`) will now pass the strażnik in
+this repo, and that issues get triaged with `/to-issues-ralph` or `$to-issues-ralph`. Mention
+the reword from step 7 only if one was made.
 
 ## Notes
 
 - The strażnik is fail-closed: a missing file, a missing/empty `## Ralph` section, or vague
   loops/criteria all halt the run. This skill's job is to produce a section that passes it.
-- Run on **Sonnet or better** — stack detection and done-criteria need real judgment.
+- Run on a capable model — stack detection and done-criteria need real judgment.
 - One `## Ralph` section per repo; re-running this skill should update it in place.

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Test strażnika (ralph/preflight.sh). Sprawdza ZEWNĘTRZNY kontrakt — kod wyjścia + komunikat —
-# nie wnętrze. Gałąź modelu (Haiku) jest stubowana przez RALPH_GATE_CMD, więc test jest
-# deterministyczny i nie wymaga ani sieci, ani zainstalowanego `claude`.
+# nie wnętrze. Gałąź modelu jest stubowana przez RALPH_GATE_CMD, więc test jest
+# deterministyczny i nie wymaga ani sieci, ani zainstalowanego runtime'u.
 #
 # Uruchom: bash ralph/test/preflight.test.sh
 set -uo pipefail
@@ -12,12 +12,16 @@ PREFLIGHT="$SCRIPT_DIR/../preflight.sh"
 pass=0; fail=0
 LAST_OUT=""; LAST_RC=0
 
-# run <claude_md_content|__NOFILE__> <gate_stub_cmd>
+# run <contract_content|__NOFILE__> <gate_stub_cmd> [runtime]
 run() {
-  local content="$1" stub="${2:-}" dir
+  local content="$1" stub="${2:-}" runtime="${3:-claude}" file dir
   dir=$(mktemp -d)
-  [ "$content" != "__NOFILE__" ] && printf '%s' "$content" > "$dir/CLAUDE.md"
-  LAST_OUT=$(cd "$dir" && RALPH_GATE_CMD="$stub" bash "$PREFLIGHT" 2>&1)
+  case "$runtime" in
+    codex) file="AGENTS.md" ;;
+    *) file="CLAUDE.md" ;;
+  esac
+  [ "$content" != "__NOFILE__" ] && printf '%s' "$content" > "$dir/$file"
+  LAST_OUT=$(cd "$dir" && RALPH_GATE_CMD="$stub" bash "$PREFLIGHT" "$runtime" 2>&1)
   LAST_RC=$?
   rm -rf "$dir"
 }
@@ -64,6 +68,13 @@ expect "treść + gate pusto -> fail-closed halt" 1 "/ralph-konfiguracja"
 # 7. Podsekcje ### nie kończą sekcji (treść za ### nadal liczy się jako body) + READY.
 run $'## Ralph\n\n### Feedback\n`npm test`\n\n### Done\ngdy zielone\n' "echo READY"
 expect "### podsekcje zostają w sekcji -> exit 0" 0
+
+# 8. Runtime Codex czyta AGENTS.md i kieruje do $ralph-konfiguracja.
+run "__NOFILE__" "" "codex"
+expect "codex: brak AGENTS.md -> halt + wskazówka" 1 '$ralph-konfiguracja'
+
+run "$RALPH_SECTION" "echo READY" "codex"
+expect "codex: AGENTS.md z treścią + gate READY -> exit 0" 0
 
 echo
 echo "Wynik: $pass OK, $fail FAIL"

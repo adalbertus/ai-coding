@@ -43,16 +43,17 @@ manual step ("test na telefonie"). The thing `/podsumuj` ends on; the thing `/za
 _Avoid_: TODO, plan, zadania.
 
 **Pipeline**:
-The ordered workflow stages for a repo, documented as plain prose in `CLAUDE.md` (no special
-config block), e.g. `/grill-with-docs → /to-prd → /to-issues → implementacja → test manualny`.
-`/podsumuj` reads it to name the next step; absent, the next step is free text.
+The ordered workflow stages for a repo, documented as plain prose in the native agent contract
+file (no special config block), e.g. `grill-with-docs → to-prd → to-issues → implementacja →
+test manualny`. `podsumuj` reads it to name the next step; absent, the next step is free text.
 _Avoid_: workflow (as a synonym), proces.
 
 ## Pętla Ralpha
 
 Autonomiczny, jednozadaniowy loop implementacyjny odpalany z terminala (AFK). Jeden komplet
 skryptów i promptów wspólny dla wszystkich repo; to, co per-stack (jak testować, kiedy
-„done"), żyje w sekcji `## Ralph` w CLAUDE.md repo. Zob. `docs/adr/0002`.
+„done"), żyje w sekcji `## Ralph` w natywnym kontrakcie agenta repo. Zob. `docs/adr/0002`,
+`docs/adr/0009`.
 
 **Pętla Ralpha** (Ralph loop):
 An autonomous run that takes exactly ONE task end-to-end — pick → implement → test → commit —
@@ -74,8 +75,9 @@ it does not own task policy, done-criteria, labels, or repo-specific testing rul
 _Avoid_: copying the whole Ralph implementation per agent.
 
 **Worker**:
-The model run that actually implements the selected task (explores, `/tdd`, commits). Distinct
-from the **selektor** (only picks the next task) and the **strażnik** (only gates).
+The model run that actually implements the selected task (explores, uses the runtime's TDD skill
+syntax, commits). Distinct from the **selektor** (only picks the next task) and the **strażnik**
+(only gates).
 
 **Protokół eksploracji** (exploration protocol):
 The rule for how the worker gets facts out of a repo: search first (`Grep`/`Glob`, then `Read`
@@ -94,9 +96,19 @@ GitHub flavour only; the local flavour has no selector.
 
 **Strażnik** (preflight guard):
 A fail-closed gate run before any work (in `ralph/preflight.sh`): `grep` for the `## Ralph`
-section, then a cheap Haiku check that it actually holds runnable instructions. Missing → the
-loop refuses to start and points to `/ralph-konfiguracja`. Never guesses how to test.
+section in the selected runtime's native contract file, then a cheap runtime-selected check that
+it actually holds runnable instructions. Missing → the loop refuses to start and points to
+`ralph-konfiguracja`. Never guesses how to test.
 _Avoid_: walidacja, check.
+
+**Lock worktree Ralpha** (Ralph worktree lock):
+A script-level, per-worktree lock that prevents two Ralph runs from mutating the same checkout at
+the same time. It protects files, not issue numbers: the issue number is metadata for the message,
+because two different issues can still edit the same file. If a live PID owns the lock, an
+interactive run asks whether to abort or terminate that process; a non-interactive run aborts. If
+the PID is gone, an interactive run asks whether to remove the stale lock, while a non-interactive
+run removes it and continues.
+_Avoid_: per-issue locks like `224.lock`; they do not protect the worktree.
 
 **Kontrakt agenta** (agent contract):
 The runtime-native repo instructions that declare the repo's way of working. For Ralph, the
@@ -193,16 +205,16 @@ _Avoid_: putting open questions into an ADR (an ADR records rulings — that mis
 „zapisz stan" feel hard); calling it a tracker, dziennik or log.
 
 **Sekcja `## Sesja`** (repo reminder):
-The place in a repo's `CLAUDE.md` where the proactivity rule lives, written by
-`/sesja-konfiguracja`. Needed because `/sesja` is explicit-invocation only, so nothing would
-otherwise interrupt a drifting deliberation; `CLAUDE.md` is the one place in context from the
-first message. Near-identical across repos — this is **distribution**, not configuration, and
-the value is that the rule is opt-in per repo and versioned with it. Instructions only: no
+The place in a repo's native agent contract file (`CLAUDE.md`, `AGENTS.md`) where the proactivity
+rule lives, written by `sesja-konfiguracja`. Needed because `sesja` is explicit-invocation only,
+so nothing would otherwise interrupt a drifting deliberation; native contract files are in context
+from the first message. Near-identical across repos — this is **distribution**, not configuration,
+and the value is that the rule is opt-in per repo and versioned with it. Instructions only: no
 rationale, no ADR pointers (the file is re-read on every message, so anything lookup-able is a
 standing tax).
-_Avoid_: the global `~/.claude/CLAUDE.md` (undistributed, unversioned, and its cross-repo
-pointers dangle); phrasing the rule as a measurement of context usage rather than an observation
-of the visible dialogue.
+_Avoid_: global agent contract files (undistributed, unversioned, and their cross-repo pointers
+dangle); phrasing the rule as a measurement of context usage rather than an observation of the
+visible dialogue.
 
 **Ramka** (framing):
 The argument string `/sesja` builds from `SESJA.md` and passes to `grill-with-docs` when
@@ -216,20 +228,20 @@ _Avoid_: copying `grill-with-docs`' prompt instead of framing it.
 
 ## Przykłady rozmów
 
-**Wznawianie — ciepło** (po `claude -r`, tydzień przerwy, długa skompaktowana sesja):
-— `/podsumuj`
+**Wznawianie — ciepło** (po wznowieniu sesji, tydzień przerwy, długa skompaktowana sesja):
+— `/podsumuj` lub `$podsumuj`
 — Wznawiamy grill modelu danych dla importu wyciągów; ustaliliśmy encje i nazwy, otwarta
   została kwestia walut. Przerwane w trakcie `/grill-with-docs`. Następny krok: dokończyć
   grill (waluty), potem `/to-prd`. Ruszamy?
 
-**Wznawianie — zimno** (świeży `claude`, jest STATUS najświeższy):
-— `/podsumuj`
+**Wznawianie — zimno** (świeża sesja, jest STATUS najświeższy):
+— `/podsumuj` lub `$podsumuj`
 — (z `./tmp/STATUS.md`) Domknięte: grill + PRD + issues #1–5 dla importu wyciągów. Bieżąca
   sesja jest czysta. Następny krok: implementacja, zacznij od #1. Ruszamy?
 
 **Ralph — strażnik blokuje** (terminal, repo bez kontraktu):
-— `ralph-once`
-— ✋ Brak sekcji „## Ralph" z instrukcjami testowania. Odpal w sesji Claude: `/ralph-konfiguracja`
-— (w nowej sesji, Sonnet) `/ralph-konfiguracja` wykrywa stack, dopisuje `## Ralph`, zakłada
-  labelki. Potem `ralph-once` rusza: selektor wybiera issue (wg complexity → model), worker
-  implementuje, testuje, commituje.
+— `ralph-once codex`
+— ✋ Brak sekcji „## Ralph" z instrukcjami testowania. Odpal w sesji Codex: `$ralph-konfiguracja`
+— `$ralph-konfiguracja` wykrywa stack, dopisuje `## Ralph` do `CLAUDE.md` i `AGENTS.md`, zakłada
+  labelki. Potem `ralph-once codex` rusza: selektor wybiera issue (wg complexity → model),
+  worker implementuje, testuje, commituje.

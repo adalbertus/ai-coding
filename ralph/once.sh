@@ -11,20 +11,20 @@
 # dir, reached via a symlink on PATH). `realpath` resolves that symlink so prompts are read
 # from here, while gh/git below operate on the current repo (cwd).
 SCRIPT_DIR="$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")" && pwd)"
+. "$SCRIPT_DIR/lib.sh"
 
-# Explicit-issue mode: `ralph-once <n>` runs issue <n> directly, skipping the selector
-# (and its token cost). The argument must be a bare issue number.
-ISSUE_ARG="${1:-}"
-if [ -n "$ISSUE_ARG" ] && ! printf '%s' "$ISSUE_ARG" | grep -qE '^[0-9]+$'; then
-  echo "Argument '${ISSUE_ARG}' nie jest numerem issue. Użycie: ralph-once [numer-issue]"
-  exit 1
-fi
+ralph_parse_args ralph-once "$@" || exit 1
+ralph_require_runtime "$RALPH_RUNTIME" || exit 1
+ISSUE_ARG="$RALPH_ISSUE_ARG"
+
+ralph_acquire_lock "${ISSUE_ARG:-selector}" || exit 0
+trap ralph_release_lock EXIT INT TERM
 
 # 0. HARD GATE: never pile up unverified work. If any issue is already implemented and is
 #    waiting for a human to verify it (label `needs-human-test`), stop here and list them —
 #    do NOT pick up new work until they are verified and closed. Inert in repos that do not
 #    use the label (the query comes back empty). What counts as "done" per repo lives in the
-#    `## Ralph` section of CLAUDE.md. Skipped in explicit mode: naming an issue is a
+#    `## Ralph` section of the selected runtime's native contract file. Skipped in explicit mode: naming an issue is a
 #    deliberate override, so the loop-safety gate does not apply.
 if [ -z "$ISSUE_ARG" ]; then
   echo "Ralph: sprawdzam zadania czekające na weryfikację (needs-human-test)..."
@@ -39,10 +39,10 @@ if [ -z "$ISSUE_ARG" ]; then
   fi
 fi
 
-# Strażnik (fail-closed): refuse to run unless this repo declares a usable "## Ralph"
-# section in CLAUDE.md. On halt it prints the reason + how to fix and exits non-zero, so
-# `|| exit 0` stops the loop cleanly (the message is already on screen).
-"$SCRIPT_DIR/preflight.sh" || exit 0
+# Strażnik (fail-closed): refuse to run unless this repo declares a usable "## Ralph" section
+# in the selected runtime's native contract file. On halt it prints the reason + how to fix and
+# exits non-zero, so `|| exit 0` stops the loop cleanly (the message is already on screen).
+"$SCRIPT_DIR/preflight.sh" "$RALPH_RUNTIME" || exit 0
 
 # 1. Recent history, for both the selector and the worker.
 commits=$(git log -n 5 --format="%H%n%ad%n%B---" --date=short 2>/dev/null || echo "No commits found")
@@ -83,10 +83,11 @@ else
   fi
 
   # Stage 1 — cheap selector. Picks ONE issue number (or NO_TASK). Tool-free, so it
-  #   reasons over the issue bodies provided above; runs on the cheapest capable model.
+  #   reasons over the issue bodies provided above; runs through the selected runtime's
+  #   cheap/read-only adapter.
   select_prompt=$(cat "$SCRIPT_DIR/select.md")
-  echo "Selektor (claude-haiku-4-5) wybiera następne zadanie... (chwilę trwa)"
-  selection=$(claude -p --model claude-haiku-4-5-20251001 --effort low \
+  echo "Selektor ($(ralph_selector_model_label "$RALPH_RUNTIME")) wybiera następne zadanie... (chwilę trwa)"
+  selection=$(ralph_run_model_capture "$RALPH_RUNTIME" selector \
     "Previous commits: $commits Issues: $issues $select_prompt" 2>/dev/null)
   num=$(printf '%s' "$selection" | grep -Eo 'NO_TASK|[0-9]+' | head -1)
 
@@ -108,33 +109,26 @@ complexity=$(gh issue view "$num" --json labels \
   2>/dev/null)
 complexity="${complexity:-normal}"
 
-case "$complexity" in
-  heavy)   model="claude-opus-4-8"; effort="high"   ;;
-  trivial) model="haiku";  effort="medium" ;;
-  *)       model="sonnet"; effort="medium" ;; # 'normal' + anything unexpected
-esac
+ralph_model_for_complexity "$RALPH_RUNTIME" "$complexity"
+model="$RALPH_MODEL"
+effort="$RALPH_EFFORT"
 
-echo "Wybrane issue #${num} (complexity:${complexity}) -> ${model} (effort:${effort})"
+echo "Wybrane issue #${num} (complexity:${complexity}) -> $(ralph_model_display "$RALPH_RUNTIME" "$model" "$effort")"
 
 # 4. Stage 2 — implement ONLY the selected issue, on the chosen model.
 issue=$(gh issue view "$num" --json number,title,body \
   --jq '"## Issue #\(.number): \(.title)\n\n\(.body)\n"' 2>/dev/null)
-prompt=$(cat "$SCRIPT_DIR/prompt.md")
+prompt=$(ralph_render_prompt "$RALPH_RUNTIME" "$SCRIPT_DIR/prompt.md")
 
-echo "Zaczynam implementację issue #${num} na ${model}..."
-# `auto` (not `acceptEdits`): acceptEdits auto-approves file edits ONLY, so every Bash call
-# outside the user's allowlist — `git commit`, `gh issue close`, the ## Ralph feedback loops —
-# still stops for approval, and an AFK loop hangs. Auto mode is Claude Code's default: a
-# classifier vets each tool call for risk and prompt injection, approves the low-risk ones and
-# denies the rest to the model, never to a human. Not `bypassPermissions`: that skips the
-# injection check too, and this loop feeds GitHub issue bodies into an agent running in real
-# repos. See docs/adr/0007-*.
-claude --permission-mode auto --model "$model" --effort "$effort" \
+echo "Zaczynam implementację issue #${num} przez runtime ${RALPH_RUNTIME} na $(ralph_model_display "$RALPH_RUNTIME" "$model" "$effort")..."
+# Claude uses `auto` (not `acceptEdits`): acceptEdits auto-approves file edits ONLY, so every
+# Bash call outside the user's allowlist — `git commit`, `gh issue close`, the ## Ralph feedback
+# loops — still stops for approval, and an AFK loop hangs. Auto mode is Claude Code's default:
+# a classifier vets each tool call for risk and prompt injection. Codex uses the analogous
+# non-interactive exec path with workspace-write sandbox and auto-review.
+ralph_run_worker "$RALPH_RUNTIME" "$model" "$effort" \
   "Previous commits: $commits Issue to work (work ONLY this one): $issue $prompt"
 
 # Auto mode denies without prompting, so a run that could not finish (e.g. the commit was
 # blocked) now ends quietly. Uncommitted leftovers would poison the NEXT run — say it out loud.
-if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
-  echo "⚠️  Ralph zostawił niezacommitowane zmiany w drzewie roboczym."
-  echo "   Sprawdź (git status) i domknij je, zanim odpalisz kolejny przebieg."
-fi
+ralph_warn_dirty_tree

@@ -1,15 +1,16 @@
 ---
 name: sesja-konfiguracja
-description: One-time per-repo setup for the /sesja skill. Writes a "## Sesja" section into the repo's CLAUDE.md so a long deliberation gets interrupted before it leaves the smart zone, and makes sure ./tmp/ stays out of git. Invoked only explicitly via /sesja-konfiguracja.
+description: One-time per-repo setup for the sesja skill. Writes a "## Sesja" section into the repo's native agent contract files (CLAUDE.md and AGENTS.md) so a long deliberation gets interrupted before it leaves the smart zone, and makes sure ./tmp/ stays out of git. Invoked explicitly via /sesja-konfiguracja or $sesja-konfiguracja.
 disable-model-invocation: true
 ---
 
-# /sesja-konfiguracja — arm this repo for `/sesja`
+# /sesja-konfiguracja / $sesja-konfiguracja — arm this repo for sesja
 
-`/sesja` works in any repo without setup, but nothing will **remind** the user to use it: the
-skill is explicit-invocation only, so a deliberation drifts out of the smart zone unnoticed
-until they think of it themselves — at the worst possible moment for remembering anything. The
-reminder has to sit in the repo's `CLAUDE.md`, which is in context from the first message.
+`/sesja` or `$sesja` works in any repo without setup, but nothing will **remind** the user to use
+it: the skill is explicit-invocation only, so a deliberation drifts out of the smart zone
+unnoticed until they think of it themselves — at the worst possible moment for remembering
+anything. The reminder has to sit in the repo's native agent contract file (`CLAUDE.md` for
+Claude, `AGENTS.md` for Codex), which is in context from the first message.
 
 This skill puts it there, once, per repo. The section is near-identical everywhere: this is
 **distribution**, not configuration, and that is fine — the point is that the rule is opt-in per
@@ -32,17 +33,17 @@ Never edit `.gitignore` unasked — it is a tracked file and may be somebody els
 
 ## 2. Write the `## Sesja` section
 
-Into the repo's `CLAUDE.md` (create the file if absent). Level-2 heading exactly `## Sesja` —
-untranslated, it is the skill's name and the anchor for replacing the section later. If one
-already exists, **replace it in place** — never append a duplicate.
+Into the repo's `CLAUDE.md` and `AGENTS.md` (create either file if absent). Level-2 heading
+exactly `## Sesja` — untranslated, it is the skill's name and the anchor for replacing the
+section later. If one already exists, **replace it in place** — never append a duplicate.
 
 **Match the language of the surrounding file**, which varies per repo: check what the existing
 sections (especially `## Ralph`) are written in and pick the template accordingly. A Polish
-paragraph dropped into an English `CLAUDE.md` reads as an oversight and invites someone to
+paragraph dropped into an English agent contract file reads as an oversight and invites someone to
 "fix" it.
 
-Both templates are verbatim, and short on purpose — everything in `CLAUDE.md` is paid for on
-every single message.
+Both templates are verbatim, and short on purpose — everything in `CLAUDE.md` / `AGENTS.md` is
+paid for on every single message.
 
 ### Polish `CLAUDE.md`
 
@@ -54,11 +55,12 @@ przebiegów implementacyjnych: tam kontekst to dosłowne odczyty plików, więc 
 jest stratą, nie zyskiem.
 
 - Gdy zauważysz w widocznym kontekście, że wracamy do sprawy uznanej wyżej za ustaloną albo
-  odrzuconą — albo że pytasz drugi raz o to samo — przerwij i zaproponuj `/sesja`.
+  odrzuconą — albo że pytasz drugi raz o to samo — przerwij i zaproponuj `/sesja` (Claude) albo
+  `$sesja` (Codex).
 - To ma być obserwacja tego, co widać w rozmowie, nigdy szacowanie własnego zużycia kontekstu
   ani odległości do limitu. Nie masz do tego wglądu.
-- Nie proponuj `/compact` dla takiej rozmowy: gubi to, co odrzucone, więc napędza powtórzone
-  pytania. Zamiast tego `/sesja`, potem `/clear`.
+- Nie proponuj kompaktowania dla takiej rozmowy: gubi to, co odrzucone, więc napędza powtórzone
+  pytania. Zamiast tego użyj skilla sesja, potem wyczyść kontekst.
 ```
 
 ### English `CLAUDE.md`
@@ -71,18 +73,20 @@ to implementation runs: their context is verbatim file reads, so clearing it is 
 gain.
 
 - When you notice in the visible context that we are returning to something settled or rejected
-  above — or that you are asking the same question twice — stop and propose `/sesja`.
+  above — or that you are asking the same question twice — stop and propose `/sesja` (Claude) or
+  `$sesja` (Codex).
 - This must be an observation of what is visible in the conversation, never an estimate of your
   own context usage or of how close the limit is. You have no insight into that.
-- Do not propose `/compact` for such a conversation: it loses what was rejected, so it drives
-  the repeated questions. Use `/sesja`, then `/clear`.
+- Do not propose compaction for such a conversation: it loses what was rejected, so it drives
+  the repeated questions. Use the sesja skill, then clear context.
 ```
 
 Do **not** enrich either — no rationale, no pointers into `docs/adr/`, no cross-repo references.
-`CLAUDE.md` carries instructions only; anything a reader could look up elsewhere is a permanent
-tax on every message in that repo.
+Native agent contract files carry instructions only; anything a reader could look up elsewhere is
+a permanent tax on every message in that repo.
 
 ## 3. Hand back
 
 One or two Polish sentences: that this repo will now propose a checkpoint on its own, and that
-`/sesja <temat>` starts a topic. Mention the `.gitignore` change only if one was made.
+`/sesja <temat>` or `$sesja <temat>` starts a topic. Mention the `.gitignore` change only if one
+was made.

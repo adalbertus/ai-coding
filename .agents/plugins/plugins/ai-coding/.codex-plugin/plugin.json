@@ -1,0 +1,22 @@
+{
+  "name": "ai-coding",
+  "version": "0.1.0",
+  "description": "Personal AI coding workflow skills and Ralph loop helpers.",
+  "author": {
+    "name": "Wojtek"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "ai-coding",
+    "shortDescription": "Skills for deliberation, handoff, and Ralph tasks.",
+    "longDescription": "Local Codex plugin for the ai-coding workflow: session checkpoints, Ralph repo setup, and issue breakdown for autonomous implementation loops.",
+    "developerName": "Wojtek",
+    "category": "Productivity",
+    "capabilities": ["Skills"],
+    "defaultPrompt": [
+      "Set up Ralph for this repo.",
+      "Turn this plan into Ralph issues.",
+      "Summarize where this work stopped."
+    ]
+  }
+}

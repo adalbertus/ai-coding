@@ -79,7 +79,7 @@ safety net for blast radius is the automated gate plus `needs-human-test`, not a
 model — so route such a slice by its substance, which is usually `normal`.
 
 **Design judgment is front-loaded.** By the time a slice reaches this loop it has been through
-`/grill-with-docs` → PRD → breakdown on a strong model with a human, so "the design isn't
+`grill-with-docs` → PRD → breakdown on a strong model with a human, so "the design isn't
 settled" should almost never appear here. If a slice still looks under-specified, that is a gap
 in the grill or breakdown: **sharpen its acceptance criteria until a mid-tier model can finish
 it — do not escalate the model to paper over a vague issue.** Sharpen before you escalate.

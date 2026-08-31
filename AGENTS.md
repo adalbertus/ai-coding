@@ -1,7 +1,7 @@
 # ai-coding — agent notes
 
-Personal AI coding tooling: skills (`/zapisz`, `/podsumuj`, `/sesja`, `/sesja-konfiguracja`,
-`/ralph-konfiguracja`, `/to-issues-ralph`; Codex uses `$...`) plus the shared Ralph loop.
+Personal AI coding tooling: skills (`$zapisz`, `$podsumuj`, `$sesja`, `$sesja-konfiguracja`,
+`$ralph-konfiguracja`, `$to-issues-ralph`; Claude uses `/...`) plus the shared Ralph loop.
 Distributed as symlinks by `install.sh`.
 
 - **Glossary / domain model:** `CONTEXT.md` — consult it (grep for the term) before introducing a
@@ -38,11 +38,11 @@ przebiegów implementacyjnych: tam kontekst to dosłowne odczyty plików, więc 
 jest stratą, nie zyskiem.
 
 - Gdy zauważysz w widocznym kontekście, że wracamy do sprawy uznanej wyżej za ustaloną albo
-  odrzuconą — albo że pytasz drugi raz o to samo — przerwij i zaproponuj `/sesja`.
+  odrzuconą — albo że pytasz drugi raz o to samo — przerwij i zaproponuj `$sesja`.
 - To ma być obserwacja tego, co widać w rozmowie, nigdy szacowanie własnego zużycia kontekstu
   ani odległości do limitu. Nie masz do tego wglądu.
-- Nie proponuj `/compact` dla takiej rozmowy: gubi to, co odrzucone, więc napędza powtórzone
-  pytania. Zamiast tego `/sesja`, potem `/clear`.
+- Nie proponuj kompaktowania dla takiej rozmowy: gubi to, co odrzucone, więc napędza powtórzone
+  pytania. Zamiast tego `$sesja`, potem wyczyść kontekst.
 
 ## Tests
 

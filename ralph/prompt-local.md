@@ -10,11 +10,11 @@ what work has been done.
 
 If all AFK tasks are complete, output <promise>NO MORE TASKS</promise>.
 
-# REPO CONTRACT (## Ralph in CLAUDE.md)
+# REPO CONTRACT (## Ralph in {AGENT_CONTRACT_FILE})
 
 This loop is stack-agnostic. Everything specific to THIS repo — the feedback-loop commands
 to run, what "done" means (done-criteria), and any commit conventions — lives in the
-`## Ralph` section of this repo's CLAUDE.md. Read it now and follow it. A preflight guard has
+`## Ralph` section of this repo's {AGENT_CONTRACT_FILE}. Read it now and follow it. A preflight guard has
 already confirmed the section exists and is usable, so it is safe to rely on.
 
 # TASK SELECTION
@@ -32,7 +32,7 @@ Pick the next task. Prioritize tasks in this order:
 
 # EXPLORATION
 
-Explore the repo. Note its structure and conventions (CLAUDE.md), and the existing tests that
+Explore the repo. Note its structure and conventions ({AGENT_CONTRACT_FILE}), and the existing tests that
 the `## Ralph` feedback loops run.
 
 **Search before you read.** A full `Read` of a large reference file (a glossary, a big module)
@@ -48,11 +48,11 @@ run — degrading your own reasoning exactly when the implementation needs it. S
   so it earns its keep for open-ended reconnaissance and nothing else.
 
 This is how to read an instruction like "read `CONTEXT.md` before introducing a new term" in a
-repo's CLAUDE.md: **consult** that file for what you need. Do not pull all of it into context.
+repo's {AGENT_CONTRACT_FILE}: **consult** that file for what you need. Do not pull all of it into context.
 
 # IMPLEMENTATION
 
-Use /tdd to complete the task. Keep risky logic (parsing, the data layer, business rules,
+Use {SKILL_TDD} to complete the task. Keep risky logic (parsing, the data layer, business rules,
 date math) in isolated, unit-testable modules, following this repo's conventions. Some work
 cannot be proven by the automated gate (e.g. UI, or device/native behaviour); for that, write
 the thin layer over the tested modules and rely on human verification — the `## Ralph`
@@ -60,7 +60,7 @@ done-criteria say when that applies (see THE ISSUE).
 
 # FEEDBACK LOOPS
 
-Before committing, run the feedback loops declared in the `## Ralph` section of CLAUDE.md and
+Before committing, run the feedback loops declared in the `## Ralph` section of {AGENT_CONTRACT_FILE} and
 make them all green. Do not invent commands — use exactly the ones declared there.
 
 # DOC-SYNC (only when you will move the issue to issues/done/)
