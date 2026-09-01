@@ -82,6 +82,36 @@ RALPH_CODEX_MODEL_NORMAL="gpt-test" ralph_model_for_complexity codex normal
 expect_eq "Codex normal env model override" "$RALPH_MODEL/$RALPH_EFFORT" "gpt-test/medium"
 unset RALPH_CODEX_MODEL_NORMAL
 
+fake_codex_dir=$(mktemp -d)
+mkdir "$fake_codex_dir/bin"
+cat > "$fake_codex_dir/bin/codex" <<'FAKE_CODEX'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "$CODEX_ARGV_CAPTURE"
+FAKE_CODEX
+chmod +x "$fake_codex_dir/bin/codex"
+
+(
+  PATH="$fake_codex_dir/bin:$PATH"
+  CODEX_ARGV_CAPTURE="$fake_codex_dir/guard.argv"
+  export CODEX_ARGV_CAPTURE
+  ralph_run_model_capture codex guard "PROMPT" >/dev/null
+)
+expect_eq "Codex guard passes approval policy before exec" \
+  "$(cat "$fake_codex_dir/guard.argv")" \
+  $'-a\nnever\nexec\n--ephemeral\n-s\nread-only\n-C\n'"$PWD"$'\nPROMPT'
+
+(
+  PATH="$fake_codex_dir/bin:$PATH"
+  CODEX_ARGV_CAPTURE="$fake_codex_dir/worker.argv"
+  export CODEX_ARGV_CAPTURE
+  ralph_run_worker codex gpt-test low "PROMPT" >/dev/null
+)
+expect_eq "Codex worker starts interactive CLI with auto-review" \
+  "$(cat "$fake_codex_dir/worker.argv")" \
+  $'--no-alt-screen\n--approve-for-me\n-C\n'"$PWD"$'\n-m\ngpt-test\n-c\nmodel_reasoning_effort="low"\nPROMPT'
+
+rm -rf "$fake_codex_dir"
+
 lock_repo=$(mktemp -d)
 (
   cd "$lock_repo" || exit 1

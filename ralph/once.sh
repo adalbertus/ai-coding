@@ -124,8 +124,8 @@ echo "Zaczynam implementację issue #${num} przez runtime ${RALPH_RUNTIME} na $(
 # Claude uses `auto` (not `acceptEdits`): acceptEdits auto-approves file edits ONLY, so every
 # Bash call outside the user's allowlist — `git commit`, `gh issue close`, the ## Ralph feedback
 # loops — still stops for approval, and an AFK loop hangs. Auto mode is Claude Code's default:
-# a classifier vets each tool call for risk and prompt injection. Codex uses the analogous
-# non-interactive exec path with workspace-write sandbox and auto-review.
+# a classifier vets each tool call for risk and prompt injection. Codex uses its interactive CLI
+# with inline output and auto-review, so the human can interrupt or add instructions mid-run.
 ralph_run_worker "$RALPH_RUNTIME" "$model" "$effort" \
   "Previous commits: $commits Issue to work (work ONLY this one): $issue $prompt"
 

@@ -142,7 +142,7 @@ ralph_run_model_capture() {
       claude -p --model "$model" --effort low "$prompt"
       ;;
     codex)
-      codex exec --ephemeral -s read-only -a never -C "$PWD" "$prompt"
+      codex -a never exec --ephemeral -s read-only -C "$PWD" "$prompt"
       ;;
     *)
       echo "Nieznany runtime: $runtime" >&2
@@ -159,7 +159,7 @@ ralph_run_worker() {
       claude --permission-mode auto --model "$model" --effort "$effort" "$prompt"
       ;;
     codex)
-      local args=(exec --approve-for-me -s workspace-write -a never -C "$PWD")
+      local args=(--no-alt-screen --approve-for-me -C "$PWD")
       [ -n "$model" ] && args+=(-m "$model")
       [ -n "$effort" ] && args+=(-c "model_reasoning_effort=\"$effort\"")
       codex "${args[@]}" "$prompt"
