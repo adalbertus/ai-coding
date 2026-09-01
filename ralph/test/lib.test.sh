@@ -104,6 +104,45 @@ else
   fail=$((fail+1))
 fi
 
+ralph_trap_release_lock
+trap_hup=$(trap -p HUP)
+trap_term=$(trap -p TERM)
+trap_int=$(trap -p INT)
+trap EXIT INT TERM HUP
+if printf '%s\n' "$trap_hup" | grep -q 'ralph_release_lock; exit 129' &&
+  printf '%s\n' "$trap_term" | grep -q 'ralph_release_lock; exit 143' &&
+  printf '%s\n' "$trap_int" | grep -q 'ralph_release_lock; exit 130'; then
+  echo "✓ signal traps release lock and exit"
+  pass=$((pass+1))
+else
+  echo "✗ signal traps release lock and exit"
+  fail=$((fail+1))
+fi
+
+stale_repo=$(mktemp -d)
+(
+  cd "$stale_repo" || exit 1
+  git init -q
+  stale_lock="$(git rev-parse --git-path ralph.lock.d)"
+  mkdir "$stale_lock"
+  printf 'pid=999999\nruntime=claude\nissue=235\n' > "$stale_lock/meta"
+  RALPH_RUNTIME=codex
+  output=$(ralph_acquire_lock 236 2>&1 </dev/null)
+  printf '%s\n' "$output" | grep -q 'Stary lock bez żywego PID; usuwam i kontynuuję.' || exit 1
+  [ -d "$stale_lock" ] || exit 1
+  grep -q '^issue=236$' "$stale_lock/meta" || exit 1
+  ralph_release_lock
+)
+stale_rc=$?
+rm -rf "$stale_repo"
+if [ "$stale_rc" = 0 ]; then
+  echo "✓ stale lock cleanup is explicit in non-interactive mode"
+  pass=$((pass+1))
+else
+  echo "✗ stale lock cleanup is explicit in non-interactive mode"
+  fail=$((fail+1))
+fi
+
 echo
 echo "Wynik: $pass OK, $fail FAIL"
 [ "$fail" = 0 ]

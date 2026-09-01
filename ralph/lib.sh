@@ -174,7 +174,7 @@ ralph_run_worker() {
 ralph_lock_metadata() {
   local issue="${1:-selector}"
   {
-    printf 'pid=%s\n' "$$"
+    printf 'pid=%s\n' "${BASHPID:-$$}"
     printf 'runtime=%s\n' "$RALPH_RUNTIME"
     printf 'issue=%s\n' "$issue"
     printf 'branch=%s\n' "$(git branch --show-current 2>/dev/null || echo unknown)"
@@ -258,7 +258,8 @@ ralph_acquire_lock() {
       esac
     else
       if [ -t 0 ]; then
-        choice="$(ralph_prompt_choice "Stale lock. [Enter] usuń i kontynuuj, [a] przerwij: " "remove")"
+        echo "Stary lock: proces już nie działa." >&2
+        choice="$(ralph_prompt_choice "[Enter] usuń i kontynuuj, [a] przerwij: " "remove")"
         case "$choice" in
           a|A|abort|ABORT)
             echo "Przerwano — stale lock zostaje." >&2
@@ -266,7 +267,7 @@ ralph_acquire_lock() {
             ;;
         esac
       else
-        echo "Stale lock bez żywego PID; tryb nieinteraktywny usuwa lock i kontynuuje." >&2
+        echo "Stary lock bez żywego PID; usuwam i kontynuuję." >&2
       fi
       rm -rf "$RALPH_LOCK_DIR"
     fi
@@ -279,7 +280,15 @@ ralph_acquire_lock() {
 ralph_release_lock() {
   if [ "$RALPH_LOCK_OWNED" = 1 ] && [ -n "$RALPH_LOCK_DIR" ] && [ -d "$RALPH_LOCK_DIR" ]; then
     rm -rf "$RALPH_LOCK_DIR"
+    RALPH_LOCK_OWNED=0
   fi
+}
+
+ralph_trap_release_lock() {
+  trap ralph_release_lock EXIT
+  trap 'ralph_release_lock; exit 130' INT
+  trap 'ralph_release_lock; exit 143' TERM
+  trap 'ralph_release_lock; exit 129' HUP
 }
 
 ralph_warn_dirty_tree() {

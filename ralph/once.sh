@@ -18,7 +18,7 @@ ralph_require_runtime "$RALPH_RUNTIME" || exit 1
 ISSUE_ARG="$RALPH_ISSUE_ARG"
 
 ralph_acquire_lock "${ISSUE_ARG:-selector}" || exit 0
-trap ralph_release_lock EXIT INT TERM
+ralph_trap_release_lock
 
 # 0. HARD GATE: never pile up unverified work. If any issue is already implemented and is
 #    waiting for a human to verify it (label `needs-human-test`), stop here and list them —

@@ -9,7 +9,7 @@ ralph_parse_args ralph-once-local "$@" || exit 1
 ralph_require_runtime "$RALPH_RUNTIME" || exit 1
 
 ralph_acquire_lock local || exit 0
-trap ralph_release_lock EXIT INT TERM
+ralph_trap_release_lock
 
 # Strażnik (fail-closed): refuse to run unless this repo declares a usable "## Ralph" section
 # in its selected runtime's native agent contract file. On halt it prints the reason + how to
