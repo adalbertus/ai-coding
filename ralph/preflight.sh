@@ -40,17 +40,44 @@ halt() {
 grep -qE '^#{1,2}[[:space:]]+Ralph([[:space:]]|$)' "$contract_file" \
   || halt "$contract_file nie ma sekcji \"## Ralph\"."
 
-# Extract the section body: from the Ralph heading up to (not including) the next level-1/2
-# heading. "### " subheadings stay inside the section.
-section=$(awk '
-  /^#{1,2}[[:space:]]+Ralph([[:space:]]|$)/ { f=1; print; next }
-  f && /^#{1,2}[[:space:]]/ { exit }
-  f { print }
-' "$contract_file")
+# Extract the section body (shared with the drift gate below).
+section=$(ralph_contract_section "$contract_file")
 
 # Deterministic fast-fail: a heading with no real content below it is a placeholder.
 body=$(printf '%s\n' "$section" | sed '1d' | tr -d '[:space:]')
 [ -n "$body" ] || halt "Sekcja \"## Ralph\" jest pusta (placeholder)."
+
+# Contract drift gate: when the repo carries BOTH contract files and both declare "## Ralph",
+# the two sections must say the same thing. They are meant to be written in one pass of
+# /ralph-konfiguracja, so a difference means one of them froze — and the runtime you run less
+# often then works off stale rules (commit target, doc-sync list). Runs for both runtimes: a gate
+# that only fires on the rare run is exactly how such drift survives.
+#
+# Missing second file, or a second file without the section: no gate. A Claude-only repo with no
+# AGENTS.md stays legal, and a missing section halts loudly in that runtime's own preflight above.
+other_file="$(ralph_contract_file "$([ "$runtime" = codex ] && echo claude || echo codex)")"
+
+normalize_section() {
+  sed -e 's/[[:space:]]*$//' -e '/^$/d'
+}
+
+if [ -f "$other_file" ] && grep -qE '^#{1,2}[[:space:]]+Ralph([[:space:]]|$)' "$other_file"; then
+  other_section=$(ralph_contract_section "$other_file")
+  if ! diff_out=$(diff -u \
+    <(printf '%s\n' "$section" | normalize_section) \
+    <(printf '%s\n' "$other_section" | normalize_section) 2>/dev/null); then
+    echo "✋ Sekcje \"## Ralph\" w $contract_file i $other_file się różnią." >&2
+    echo "   Runtime, którego używasz rzadziej, pracowałby na nieaktualnych regułach" >&2
+    echo "   (gałąź commitów, lista dokumentów do doc-sync)." >&2
+    echo "   Różnica (-$contract_file / +$other_file):" >&2
+    printf '%s\n' "$diff_out" | sed -e '1,2d' -e 's/^/   /' >&2
+    case "$runtime" in
+      codex) echo "   Napraw jednym przebiegiem: \$ralph-konfiguracja" >&2 ;;
+      *) echo "   Napraw jednym przebiegiem: /ralph-konfiguracja" >&2 ;;
+    esac
+    exit 1
+  fi
+fi
 
 # Model gate: confirm the section actually holds runnable test/done instructions.
 gate_prompt="Poniżej sekcja \"## Ralph\" z pliku $contract_file repozytorium. Ma powiedzieć

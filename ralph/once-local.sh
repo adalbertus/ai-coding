@@ -16,8 +16,17 @@ ralph_trap_release_lock
 # fix; `|| exit 0` stops the loop cleanly.
 "$SCRIPT_DIR/preflight.sh" "$RALPH_RUNTIME" || exit 0
 
-# 1. Gather all markdown files from the issues directory as the task list
-issues=$(cat issues/*.md 2>/dev/null || echo "No issues found")
+# 1. Task list = paths + first heading of each issue file, never their contents. Passing every
+#    issue body in full made the worker start the run with the whole backlog in context; the
+#    prompt tells it to read exactly one file (see "# ISSUES" in prompt-local.md).
+issues=$(
+  for f in issues/*.md; do
+    [ -f "$f" ] || continue
+    title=$(grep -m1 '^#' "$f" 2>/dev/null | sed 's/^#\{1,\}[[:space:]]*//')
+    printf -- '- %s — %s\n' "$f" "${title:-(bez nagłówka)}"
+  done
+)
+[ -n "$issues" ] || issues="No issues found"
 
 # 2. Get the last 5 commits to give the AI a sense of recent progress/history
 commits=$(git log -n 5 --format="%H%n%ad%n%B---" --date=short 2>/dev/null || echo "No commits found")

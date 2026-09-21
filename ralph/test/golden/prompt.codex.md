@@ -7,11 +7,11 @@ Work ONLY this issue — do not list or switch to a different one.
 You've also been passed a file containing the last few commits. Review these to understand
 what work has been done.
 
-# REPO CONTRACT (## Ralph in {AGENT_CONTRACT_FILE})
+# REPO CONTRACT (## Ralph in AGENTS.md)
 
 This loop is stack-agnostic. Everything specific to THIS repo — the feedback-loop commands
 to run, what "done" means (done-criteria), and any commit conventions — lives in the
-`## Ralph` section of this repo's {AGENT_CONTRACT_FILE}. Read it now and follow it. A preflight guard has
+`## Ralph` section of this repo's AGENTS.md. Read it now and follow it. A preflight guard has
 already confirmed the section exists and is usable, so it is safe to rely on.
 
 # SANITY CHECK BEFORE STARTING
@@ -30,11 +30,29 @@ is best-effort. So before implementing, verify two things with `gh`:
 
 # EXPLORATION
 
-{EXPLORE_GUIDANCE}
+Explore the repo. Note its structure and conventions (AGENTS.md), and the existing tests that
+the `## Ralph` feedback loops run.
+
+**Search before you read.** `cat`-ing a large reference file (a glossary, a big module) into
+context can cost tens of thousands of tokens, and every one of them stays in context for the rest
+of the run — degrading your own reasoning exactly when the implementation needs it. Reading a file
+whole is the easiest way to run this loop out of context. So read in two steps:
+
+1. **Locate the lines** — `rg -n '<pattern>' <path>` (or `grep -rn '<pattern>' <path>` where `rg`
+   is not installed). This gives you the file and the line numbers, not the file.
+2. **Read only that range** — `sed -n '<start>,<end>p' <file>`, with a window of a few dozen lines
+   around the hit. If the range turns out to be too narrow, widen it or search again. Two targeted
+   reads still cost a fraction of the whole file.
+
+Use `cat` only on a file you already know is short — `wc -l <file>` when unsure. Never `cat` a
+glossary, a contract file, or a directory-wide glob.
+
+This is how to read an instruction like "read `CONTEXT.md` before introducing a new term" in a
+repo's AGENTS.md: **consult** that file for what you need. Do not pull all of it into context.
 
 # IMPLEMENTATION
 
-Use {SKILL_TDD} to complete the task. Keep risky logic (parsing, the data layer, business rules,
+Use $tdd to complete the task. Keep risky logic (parsing, the data layer, business rules,
 date math) in isolated, unit-testable modules, following this repo's conventions. Some work
 cannot be proven by the automated gate (e.g. UI, or device/native behaviour); for that, write
 the thin layer over the tested modules and rely on human verification — the `## Ralph`
@@ -42,7 +60,7 @@ done-criteria say when that applies (see THE ISSUE).
 
 # FEEDBACK LOOPS
 
-Before committing, run the feedback loops declared in the `## Ralph` section of {AGENT_CONTRACT_FILE} and
+Before committing, run the feedback loops declared in the `## Ralph` section of AGENTS.md and
 make them all green. Do not invent commands — use exactly the ones declared there.
 
 # DOC-SYNC (only when you will self-close)

@@ -51,5 +51,12 @@ bash ralph/test/preflight.test.sh
 bash ralph/test/lib.test.sh
 ```
 
-Run these after changing `ralph/*.sh`. The model branch is stubbed via `RALPH_GATE_CMD`, so
-preflight tests are deterministic — no network, no installed agent runtime.
+Run these after changing `ralph/*.sh` **or `ralph/prompt*.md`**. The model branch is stubbed via
+`RALPH_GATE_CMD`, so preflight tests are deterministic — no network, no installed agent runtime.
+
+`lib.test.sh` compares the rendered prompts against `ralph/test/golden/*` for both runtimes.
+After a deliberate prompt change, regenerate them and commit the diff:
+
+```bash
+UPDATE_GOLDEN=1 bash ralph/test/lib.test.sh
+```

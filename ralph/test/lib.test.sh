@@ -72,6 +72,62 @@ expect_eq "render Claude prompt" "$(ralph_render_prompt claude "$tmp_prompt")" "
 expect_eq "render Codex prompt" "$(ralph_render_prompt codex "$tmp_prompt")" 'Read AGENTS.md; use $tdd.'
 rm -f "$tmp_prompt"
 
+# {EXPLORE_GUIDANCE} is spliced in BEFORE the other placeholders, so the {AGENT_CONTRACT_FILE}
+# markers carried by the guidance prose itself still get resolved.
+tmp_prompt=$(mktemp)
+printf '{EXPLORE_GUIDANCE}\n' > "$tmp_prompt"
+expect_fail "rendered guidance leaves no unresolved placeholder" \
+  grep -q '{[A-Z_]*}' <<<"$(ralph_render_prompt codex "$tmp_prompt")"
+rm -f "$tmp_prompt"
+
+# The two branches must be genuinely different prose, each naming the tools its runtime has.
+expect_ok "Claude exploration names Read/Grep + Explore subagent" \
+  grep -qF 'delegate to the `Explore` subagent' <<<"$(ralph_explore_guidance claude)"
+expect_ok "Codex exploration names concrete shell commands" \
+  grep -qF "sed -n '<start>,<end>p'" <<<"$(ralph_explore_guidance codex)"
+# ADR 0005: a subagent is a cheap linguistic escape hatch whose cost we have only measured on
+# Claude. Until measured on Codex, that branch must not offer it.
+expect_fail "Codex exploration does not mention subagents" \
+  grep -qi 'subagent' <<<"$(ralph_explore_guidance codex)"
+
+tmp_contract=$(mktemp)
+printf '# Repo\n\n## Ralph\n\nRun `npm test`.\n\n### Done\ngreen\n\n## Inne\nnieistotne\n' > "$tmp_contract"
+expect_eq "contract section stops at the next level-2 heading" \
+  "$(ralph_contract_section "$tmp_contract")" \
+  $'## Ralph\n\nRun `npm test`.\n\n### Done\ngreen'
+rm -f "$tmp_contract"
+
+# Golden files: for the `claude` branch this is a gate — that prose is in daily use and must not
+# drift as a side effect of a Codex change. For `codex` it is a magnifying glass: the prose is
+# being tuned against context measurements, and every version has to be visible in git history.
+# A deliberate change to either means regenerating them: UPDATE_GOLDEN=1 bash ralph/test/lib.test.sh
+GOLDEN_DIR="$SCRIPT_DIR/golden"
+for prompt_file in prompt prompt-local; do
+  for runtime in claude codex; do
+    golden="$GOLDEN_DIR/$prompt_file.$runtime.md"
+    rendered=$(ralph_render_prompt "$runtime" "$SCRIPT_DIR/../$prompt_file.md")
+    if [ -n "${UPDATE_GOLDEN:-}" ]; then
+      printf '%s\n' "$rendered" > "$golden"
+      echo "· zregenerowano $prompt_file.$runtime.md"
+      continue
+    fi
+    if [ ! -f "$golden" ]; then
+      echo "✗ brak golden file $prompt_file.$runtime.md (UPDATE_GOLDEN=1 żeby wygenerować)"
+      fail=$((fail+1))
+      continue
+    fi
+    if diff_out=$(diff -u "$golden" <(printf '%s\n' "$rendered")); then
+      echo "✓ golden render: $prompt_file.$runtime.md"
+      pass=$((pass+1))
+    else
+      echo "✗ golden render: $prompt_file.$runtime.md"
+      printf '%s\n' "$diff_out" | sed 's/^/   /'
+      echo "   Zmiana celowa? UPDATE_GOLDEN=1 bash ralph/test/lib.test.sh"
+      fail=$((fail+1))
+    fi
+  done
+done
+
 ralph_model_for_complexity claude heavy
 expect_eq "Claude heavy model" "$RALPH_MODEL/$RALPH_EFFORT" "claude-opus-4-8/high"
 

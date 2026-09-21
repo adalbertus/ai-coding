@@ -68,11 +68,78 @@ ralph_skill_tdd() {
   esac
 }
 
+# Body of the EXPLORATION section, rendered per runtime. The two branches are separate prose,
+# not one text with holes: "search, then read the matching range" is one tool with two parameters
+# under Claude Code and two shell commands under Codex, so the sentences differ in shape, not just
+# in nouns. Quoted heredocs — the prose contains backticks and must not be expanded. {…}
+# placeholders inside are resolved by ralph_render_prompt after this is spliced in.
+ralph_explore_guidance() {
+  case "$1" in
+    codex)
+      cat <<'EOF'
+Explore the repo. Note its structure and conventions ({AGENT_CONTRACT_FILE}), and the existing tests that
+the `## Ralph` feedback loops run.
+
+**Search before you read.** `cat`-ing a large reference file (a glossary, a big module) into
+context can cost tens of thousands of tokens, and every one of them stays in context for the rest
+of the run — degrading your own reasoning exactly when the implementation needs it. Reading a file
+whole is the easiest way to run this loop out of context. So read in two steps:
+
+1. **Locate the lines** — `rg -n '<pattern>' <path>` (or `grep -rn '<pattern>' <path>` where `rg`
+   is not installed). This gives you the file and the line numbers, not the file.
+2. **Read only that range** — `sed -n '<start>,<end>p' <file>`, with a window of a few dozen lines
+   around the hit. If the range turns out to be too narrow, widen it or search again. Two targeted
+   reads still cost a fraction of the whole file.
+
+Use `cat` only on a file you already know is short — `wc -l <file>` when unsure. Never `cat` a
+glossary, a contract file, or a directory-wide glob.
+
+This is how to read an instruction like "read `CONTEXT.md` before introducing a new term" in a
+repo's {AGENT_CONTRACT_FILE}: **consult** that file for what you need. Do not pull all of it into context.
+EOF
+      ;;
+    *)
+      cat <<'EOF'
+Explore the repo. Note its structure and conventions ({AGENT_CONTRACT_FILE}), and the existing tests that
+the `## Ralph` feedback loops run.
+
+**Search before you read.** A full `Read` of a large reference file (a glossary, a big module)
+can cost tens of thousands of tokens, and every one of them stays in context for the rest of the
+run — degrading your own reasoning exactly when the implementation needs it. So:
+
+- **If you can name what you are looking for** — a term, a symbol, a function, a path — use
+  `Grep`/`Glob`, then `Read` only the matching range (`offset`/`limit`). This is the default, and
+  it is not a compromise: it returns the exact source text, just less of it.
+- **Only if you cannot formulate a search pattern**, because you need an overview rather than a
+  specific fact, delegate to the `Explore` subagent. It reads in its own context and returns
+  conclusions. It costs a full extra model run and gives you a paraphrase instead of the source,
+  so it earns its keep for open-ended reconnaissance and nothing else.
+
+This is how to read an instruction like "read `CONTEXT.md` before introducing a new term" in a
+repo's {AGENT_CONTRACT_FILE}: **consult** that file for what you need. Do not pull all of it into context.
+EOF
+      ;;
+  esac
+}
+
+# Extract the "## Ralph" section body from an agent contract file: from the Ralph heading up to
+# (not including) the next level-1/2 heading. "### " subheadings stay inside the section.
+ralph_contract_section() {
+  awk '
+    /^#{1,2}[[:space:]]+Ralph([[:space:]]|$)/ { f=1; print; next }
+    f && /^#{1,2}[[:space:]]/ { exit }
+    f { print }
+  ' "$1"
+}
+
 ralph_render_prompt() {
-  local runtime="$1" prompt_file="$2" content contract_file skill_tdd
+  local runtime="$1" prompt_file="$2" content contract_file skill_tdd explore
   contract_file="$(ralph_contract_file "$runtime")"
   skill_tdd="$(ralph_skill_tdd "$runtime")"
+  explore="$(ralph_explore_guidance "$runtime")"
   content=$(cat "$prompt_file")
+  # EXPLORE_GUIDANCE first: the spliced-in prose carries {AGENT_CONTRACT_FILE} of its own.
+  content=${content//\{EXPLORE_GUIDANCE\}/$explore}
   content=${content//\{AGENT_CONTRACT_FILE\}/$contract_file}
   content=${content//\{SKILL_TDD\}/$skill_tdd}
   printf '%s\n' "$content"

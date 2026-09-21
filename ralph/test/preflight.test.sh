@@ -76,6 +76,51 @@ expect "codex: brak AGENTS.md -> halt + wskazówka" 1 '$ralph-konfiguracja'
 run "$RALPH_SECTION" "echo READY" "codex"
 expect "codex: AGENTS.md z treścią + gate READY -> exit 0" 0
 
+# --- Bramka rozjazdu kontraktu (CLAUDE.md vs AGENTS.md) ---------------------------------------
+
+# run2 <claude_content|__NOFILE__> <agents_content|__NOFILE__> <gate_stub> <runtime>
+run2() {
+  local claude_md="$1" agents_md="$2" stub="${3:-}" runtime="${4:-claude}" dir
+  dir=$(mktemp -d)
+  [ "$claude_md" != "__NOFILE__" ] && printf '%s' "$claude_md" > "$dir/CLAUDE.md"
+  [ "$agents_md" != "__NOFILE__" ] && printf '%s' "$agents_md" > "$dir/AGENTS.md"
+  LAST_OUT=$(cd "$dir" && RALPH_GATE_CMD="$stub" bash "$PREFLIGHT" "$runtime" 2>&1)
+  LAST_RC=$?
+  rm -rf "$dir"
+}
+
+DRIFTED_SECTION=$'## Ralph\n\nFeedback loops przed commitem: `composer test`, `./vendor/bin/pint`.\nCommituj prosto na `main`.\nDone: zadanie skończone, gdy testy są zielone.\n'
+
+# 9. Oba pliki z identyczną sekcją -> bramka milczy.
+run2 "$RALPH_SECTION" "$RALPH_SECTION" "echo READY" "claude"
+expect "identyczne sekcje w obu plikach -> exit 0" 0
+
+# 10. Rozjazd treści -> halt z diffem, niezależnie od runtime'u.
+run2 "$RALPH_SECTION" "$DRIFTED_SECTION" "echo READY" "claude"
+expect "rozjazd sekcji -> halt (runtime claude)" 1 "się różnią"
+expect "rozjazd pokazuje różnicę" 1 "Commituj prosto na"
+
+run2 "$RALPH_SECTION" "$DRIFTED_SECTION" "echo READY" "codex"
+expect "rozjazd sekcji -> halt (runtime codex)" 1 "się różnią"
+
+# 11. Różnica tylko w końcowych spacjach i pustych liniach -> to NIE jest rozjazd.
+#     Bajt-w-bajt wywróciłoby się tutaj i wyszkoliło w ignorowaniu bramki.
+WHITESPACE_VARIANT=$(printf '%s' "$RALPH_SECTION" | sed -e 's/$/   /' -e 's/^$//')
+WHITESPACE_VARIANT="$WHITESPACE_VARIANT"$'\n\n'
+run2 "$RALPH_SECTION" "$WHITESPACE_VARIANT" "echo READY" "claude"
+expect "różnica tylko w whitespace -> exit 0" 0
+
+# 12. Brak drugiego pliku -> brak bramki (repo tylko-Claude zostaje legalne).
+run2 "$RALPH_SECTION" "__NOFILE__" "echo READY" "claude"
+expect "brak AGENTS.md -> brak bramki, exit 0" 0
+
+# 13. Drugi plik istnieje, ale bez sekcji ## Ralph -> brak bramki; ten runtime i tak padnie
+#     głośno na własnym preflightcie, gdy go odpalisz.
+run2 "$RALPH_SECTION" $'# Repo\n\nOpis.\n' "echo READY" "claude"
+expect "AGENTS.md bez sekcji -> brak bramki, exit 0" 0
+run2 "$RALPH_SECTION" $'# Repo\n\nOpis.\n' "echo READY" "codex"
+expect "AGENTS.md bez sekcji -> halt w runtime codex" 1 '$ralph-konfiguracja'
+
 echo
 echo "Wynik: $pass OK, $fail FAIL"
 [ "$fail" = 0 ]

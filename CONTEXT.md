@@ -70,9 +70,13 @@ worker from another without saying so explicitly. Zob. `docs/adr/0009`.
 
 **Adapter runtime’u** (runtime adapter):
 The narrow translation layer between Ralph's shared concepts and a concrete CLI: command flags,
-model selection, approval/sandbox mode, and prompt vocabulary. It adapts invocation mechanics;
-it does not own task policy, done-criteria, labels, or repo-specific testing rules.
-_Avoid_: copying the whole Ralph implementation per agent.
+model selection, approval/sandbox mode, and prompt wording — including **whole paragraphs** of a
+prompt section, not only single nouns, wherever the two runtimes do the same thing in a different
+number of steps (see **protokół eksploracji**). It adapts invocation mechanics; it does not own
+task policy, done-criteria, labels, or repo-specific testing rules — that boundary is what keeps
+it narrow now that it renders prose. Zob. `docs/adr/0010`.
+_Avoid_: copying the whole Ralph implementation per agent; putting task policy into a branch
+because it was convenient to phrase it there.
 
 **Worker**:
 The model run that actually implements the selected task (explores, uses the runtime's TDD skill
@@ -80,15 +84,18 @@ syntax, commits). Distinct from the **selektor** (only picks the next task) and 
 (only gates).
 
 **Protokół eksploracji** (exploration protocol):
-The rule for how the worker gets facts out of a repo: search first (`Grep`/`Glob`, then `Read`
-only the matching range), and delegate to a subagent only when no search pattern can be
-formulated because an overview is needed rather than a fact. Deliberately **size-blind** — the
+The rule for how the worker gets facts out of a repo: locate first, then read only the matching
+range, and never pull a whole reference file into context. Deliberately **size-blind** — the
 criterion is whether the worker can name what it is looking for, not how big the file is (it
 cannot know that before reading). Guards the *smart zone*: context spent on wholesale reads is
-context missing from the implementation. Lives in `ralph/prompt.md`, so it applies to every repo
-at once. Zob. `docs/adr/0005`.
+context missing from the implementation. The rule is one; its **wording is rendered per runtime**
+(`ralph_explore_guidance()` in `ralph/lib.sh`), because "locate, then read the range" is one tool
+with two parameters under Claude Code and two shell commands under Codex. The subagent escape
+hatch is part of the Claude branch only — its cost is measured there. Zob. `docs/adr/0005`,
+`docs/adr/0010`.
 _Avoid_: „budżet kontekstu" (a token budget the model has no way to measure); a per-repo list of
-large files (it rots, and the protocol does not need it).
+large files (it rots, and the protocol does not need it); describing the protocol in one runtime's
+tool names as if they were the protocol itself.
 
 **Selektor** (selector):
 A cheap-model run that, from the open tasks, picks the single next one — it implements nothing.
@@ -98,7 +105,10 @@ GitHub flavour only; the local flavour has no selector.
 A fail-closed gate run before any work (in `ralph/preflight.sh`): `grep` for the `## Ralph`
 section in the selected runtime's native contract file, then a cheap runtime-selected check that
 it actually holds runnable instructions. Missing → the loop refuses to start and points to
-`ralph-konfiguracja`. Never guesses how to test.
+`ralph-konfiguracja`. It also gates **contract drift**: where a repo carries both contract files
+and both declare `## Ralph`, the two sections must match (modulo trailing whitespace and blank
+lines) or the run halts with a diff — otherwise the runtime you launch less often quietly works
+off stale rules. Never guesses how to test. Zob. `docs/adr/0010`.
 _Avoid_: walidacja, check.
 
 **Lock worktree Ralpha** (Ralph worktree lock):

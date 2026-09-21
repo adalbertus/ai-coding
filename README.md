@@ -177,11 +177,14 @@ Dwa flavoury, jeden zestaw promptów:
 
 Oba zaczynają od **strażnika** (`ralph/preflight.sh`, fail-closed): repo musi mieć gotową sekcję
 `## Ralph` w natywnym pliku runtime'u (`CLAUDE.md` dla Claude, `AGENTS.md` dla Codex), inaczej
-pętla halt-uje z instrukcją konfiguracji.
+pętla halt-uje z instrukcją konfiguracji. Gdy repo ma oba pliki i oba deklarują `## Ralph`,
+strażnik dodatkowo pilnuje, żeby te sekcje były **identyczne** — rozjazd oznacza, że rzadziej
+używany runtime pracuje na nieaktualnych regułach (np. commituje na inną gałąź), więc run pada
+z diffem i kieruje do `/ralph-konfiguracja`.
 
-Claude jedzie w **auto mode** (`--permission-mode auto`). Codex jedzie przez `codex exec` z
-`--approve-for-me`, `--sandbox workspace-write` i `--ask-for-approval never`. W obu przypadkach
-celem jest AFK bez `dangerously-bypass-*`.
+Claude jedzie w **auto mode** (`--permission-mode auto`). Codex jedzie jako interaktywne
+`codex --no-alt-screen --approve-for-me` (eskalacje sandboxa idą przez automatyczny review).
+W obu przypadkach celem jest AFK bez `dangerously-bypass-*`.
 
 ### Lock worktree
 

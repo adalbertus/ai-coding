@@ -87,10 +87,14 @@ repo has no special convention, you may omit this part — the prompt has a sens
 ### 5. Write the `## Ralph` section
 
 Create `CLAUDE.md` and `AGENTS.md` if missing. If a `## Ralph` section already exists in either
-file, **replace it in place** (don't append a duplicate). Use a level-2 heading exactly
+file, **replace it in place** (don't append a duplicate) — and read BOTH before writing: when the
+two have drifted, the newer one is not automatically right in every respect, so reconcile them
+point by point (commit target, doc-sync list, extra rules) and confirm anything ambiguous with
+the user. Use a level-2 heading exactly
 `## Ralph` — the strażnik greps for it. Sub-sections use `###` (they stay inside the section).
-The section content should be the same in both files unless the repo has a documented reason to
-diverge. Template:
+The section content must be **identical** in both files — the strażnik compares them (modulo
+trailing whitespace and blank lines) and halts the run on any difference. Write both in this one
+pass; never hand-edit one of them later. Template:
 
 ```markdown
 ## Ralph
@@ -106,8 +110,10 @@ Konfiguracja dla współdzielonej pętli Ralpha (`ralph-once` / `ralph-once-loca
 
 Zadanie jest skończone, gdy wszystkie feedback loops są zielone <oraz …>.
 <Jeśli dotyczy: Zmiany w UI / na urządzeniu / w modułach natywnych NIE są weryfikowalne
-automatycznie — nie zamykaj takich issue. Oznacz `needs-human-test` i zostaw człowiekowi
-z konkretnymi krokami testowymi po polsku, odwołującymi się do realnych etykiet UI.>
+automatycznie — nie zamykaj takich issue. Oznacz `needs-human-test` i zostaw człowiekowi kroki
+testowe po polsku. Jeśli issue ma już sekcję `## Jak sprawdzić ręcznie` — NIE przepisuj jej;
+wskaż ją i dopisz wyłącznie odchylenia (kroki, które przestały pasować, realne etykiety UI inne
+niż założone). Pełny scenariusz pisz od zera tylko wtedy, gdy issue takiej sekcji nie ma.>
 
 ### Doc-sync (trwała dokumentacja — synchronizuj przy zamknięciu issue)
 
