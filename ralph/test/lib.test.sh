@@ -129,7 +129,7 @@ for prompt_file in prompt prompt-local; do
 done
 
 ralph_model_for_complexity claude heavy
-expect_eq "Claude heavy model" "$RALPH_MODEL/$RALPH_EFFORT" "claude-opus-4-8/high"
+expect_eq "Claude heavy model" "$RALPH_MODEL/$RALPH_EFFORT" "opus/high"
 
 ralph_model_for_complexity codex trivial
 expect_eq "Codex trivial uses config model + low reasoning" "$RALPH_MODEL/$RALPH_EFFORT" "/low"

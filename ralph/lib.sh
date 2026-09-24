@@ -174,7 +174,7 @@ ralph_model_for_complexity() {
   RALPH_EFFORT=""
 
   case "$runtime:$complexity" in
-    claude:heavy)   RALPH_MODEL="claude-opus-4-8"; RALPH_EFFORT="high" ;;
+    claude:heavy)   RALPH_MODEL="opus"; RALPH_EFFORT="high" ;;
     claude:trivial) RALPH_MODEL="haiku"; RALPH_EFFORT="medium" ;;
     claude:*)       RALPH_MODEL="sonnet"; RALPH_EFFORT="medium" ;;
 
