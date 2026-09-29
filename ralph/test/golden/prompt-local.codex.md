@@ -63,10 +63,16 @@ cannot be proven by the automated gate (e.g. UI, or device/native behaviour); fo
 the thin layer over the tested modules and rely on human verification — the `## Ralph`
 done-criteria say when that applies (see THE ISSUE).
 
+Where $tdd asks you to confirm seams with the user, nobody is there to answer: derive the
+seams from the issue's acceptance criteria, note them in the issue file, and proceed.
+
 # FEEDBACK LOOPS
 
 Before committing, run the feedback loops declared in the `## Ralph` section of AGENTS.md and
 make them all green. Do not invent commands — use exactly the ones declared there.
+A loop that failed to start is not green. If all that is missing is the repo's declared
+dependencies, install them with its own package manager and lockfile; otherwise treat the issue
+as not complete (see THE ISSUE).
 
 # DOC-SYNC (only when you will move the issue to issues/done/)
 
@@ -118,3 +124,14 @@ Apply the done-criteria from `## Ralph` to decide how to close out:
 # FINAL RULES
 
 ONLY WORK ON A SINGLE TASK.
+
+This run is unattended: nobody reads your messages until it ends, and a message without a tool
+call stalls the run. Keep working until you have closed the issue out in one of the three ways
+under THE ISSUE. Do not end a turn with a summary that announces the next step, an offer to
+continue, or a question you can answer from the repo yourself. The only early stops are
+<promise>NO MORE TASKS</promise> when no AFK task is left, and a blocker you have recorded in the
+issue file.
+
+Do only what this issue asks. Tests the feedback loops need are part of the work; features,
+files, docs beyond the DOC-SYNC step, or refactors are not — if one would help, note it in the
+issue file instead of doing it.

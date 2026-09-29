@@ -21,6 +21,8 @@ checkpoints. Delegating (not copying) means upstream changes keep working here.
    > publish** the PRD to the issue tracker and do NOT apply `ready-for-agent`, and do
    > NOT write it to a file; instead materialize the full PRD **into your response**. It
    > stays in context as breakdown input only. This countermands `to-prd`'s step 3 (publish).
+   > The PRD is not a stopping point: in the same turn, continue with step 2 of
+   > `to-issues-ralph`.
 
    Why: the PRD denoises a long grill session into a clean one-page breakdown input and
    supplies the exhaustive user-story list the breakdown uses as a coverage checklist. It
@@ -32,7 +34,8 @@ checkpoints. Delegating (not copying) means upstream changes keep working here.
    > Run `to-issues` **non-interactively** from the PRD synthesized in step 1 (already in
    > context — do not look for a file). Do NOT perform its step 4 (Quiz the user) and do NOT
    > wait for approval — treat the breakdown as approved and proceed straight to publishing.
-   > This countermands `to-issues`' "Iterate until the user approves."
+   > This countermands `to-issues`' "Iterate until the user approves." After publishing, in
+   > the same turn, continue with steps 3–5 of `to-issues-ralph`.
 
    It applies the AFK triage label itself. Prefix every issue title with `[ISSUE]`
    (e.g. `[ISSUE] Add user login`).
@@ -64,6 +67,8 @@ checkpoints. Delegating (not copying) means upstream changes keep working here.
 5. **Record why (heavy only).** For a `complexity:heavy` issue, add one line to its body
    stating why (e.g. "heavy — touches tenant-isolation logic"), for the human reader who
    picks it up weeks later.
+
+End the turn only here, with one line per published issue: number, title, tier.
 
 ## Complexity rubric
 
