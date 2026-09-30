@@ -164,7 +164,7 @@ Pętla bierze **jedno** zadanie, implementuje je, uruchamia feedback loops i com
 ralph-once 224          # domyślnie Claude, wstecznie kompatybilne
 ralph-once claude 224   # jawnie Claude
 ralph-once codex 224    # jawnie Codex
-ralph-once 12           # 12 to epik ([PRD]) → selektor wybiera jedno z jego otwartych sub-issues
+ralph-once 12           # 12 to epic ([PRD]) → selektor wybiera jedno z jego otwartych sub-issues
 ralph-once              # selektor + worker przez Claude
 ralph-once codex        # selektor + worker przez Codex
 ralph-once-local codex  # lokalne issues/*.md przez Codex
@@ -206,60 +206,60 @@ Prompty są stack-agnostyczne — całą specyfikę repo delegują do sekcji `##
 - **doc-sync** (opcjonalnie) — trwałe dokumenty repo (known-gaps, backlog) i ich klasa; zamykając
   issue worker/człowiek najpierw godzi je z tym, co weszło. Słownik (`CONTEXT.md`) i ADR-y tylko
   się zgłasza, nie przepisuje. Bierny, gdy repo nie ma trwałych dokumentów.
-- **gałąź per epik** (opcjonalnie) — jedna linia o stałej składni `ralph-base-branch: <gałąź>`
+- **gałąź per epic** (opcjonalnie) — jedna linia o stałej składni `ralph-base-branch: <gałąź>`
   (np. `ralph-base-branch: dev`), osobno w swojej linii. Brak linii = trunk. Zła składnia zatrzymuje
   pętlę z komunikatem.
 
-Sekcja zawiera też done-criteria pod epiki (sub-issue zamyka gate, resztę sprawdza odbiór epiku),
-zamknięcie epiku („zamykaj" / „potwierdzam": doc-sync, merge gałęzi epiku do bazy, usunięcie gałęzi,
+Sekcja zawiera też done-criteria pod epice (sub-issue zamyka gate, resztę sprawdza odbiór epicu),
+zamknięcie epicu („zamykaj" / „potwierdzam": doc-sync, merge gałęzi epicu do bazy, usunięcie gałęzi,
 zamknięcie) i ścieżkę uwag z odbioru (drobiazg od razu w sesji, rzecz większa jako sub-issue
-`[ISSUE] Poprawka: …`). Linię gałęzi per epik skill wpisuje tylko dla repo z osobną gałęzią
+`[ISSUE] Poprawka: …`). Linię gałęzi per epic skill wpisuje tylko dla repo z osobną gałęzią
 produkcyjną (np. `main` = produkcja, `dev` = praca).
 
 Sekcję pisze `/ralph-konfiguracja` — nie pisz jej ręcznie.
 
 ### Przepływ
 
-Jednostką odbioru jest **epik** (rodzic `[PRD]` z natywnymi sub-issues GitHuba), a nie pojedyncze
-issue — szczegóły i uzasadnienie w `docs/adr/0012`. Każda praca jest epikiem, także jednolinijkowa
-zmiana (epik z jednym sub-issue). Terminologia: `CONTEXT.md` (**Epik**, **Odbiór**).
+Jednostką odbioru jest **epic** (rodzic `[PRD]` z natywnymi sub-issues GitHuba), a nie pojedyncze
+issue — szczegóły i uzasadnienie w `docs/adr/0012`. Każda praca jest epicem, także jednolinijkowa
+zmiana (epic z jednym sub-issue). Terminologia: `CONTEXT.md` (**Epic**, **Odbiór**).
 
 1. **`/ralph-konfiguracja` / `$ralph-konfiguracja`** — raz na repo. Wykrywa stack, pisze
    `## Ralph` do `CLAUDE.md` i `AGENTS.md`, tworzy labelki pętli na GitHubie.
-2. **`/to-issues-ralph` / `$to-issues-ralph`** — z planu/PRD publikuje epik (`[PRD]` z PRD i
+2. **`/to-issues-ralph` / `$to-issues-ralph`** — z planu/PRD publikuje epic (`[PRD]` z PRD i
    scenariuszem `## Jak odebrać`, label `ready-for-agent`) oraz sub-issues (vertical slices)
-   z triage `complexity:*`. Sub-issues nie mają sekcji ręcznej — scenariusz jest jeden, w epiku.
+   z triage `complexity:*`. Sub-issues nie mają sekcji ręcznej — scenariusz jest jeden, w epicu.
    Po tym kroku nie musisz nic robić poza uruchomieniem pętli.
 3. **`ralph-once`** (albo `ralph-once-local`) w pętli z terminala — implementacja AFK, jedno
    sub-issue na run.
-4. **Odbiór** — pętla staje raz na epik, gdy worker zamknie ostatnie sub-issue (patrz niżej).
+4. **Odbiór** — pętla staje raz na epic, gdy worker zamknie ostatnie sub-issue (patrz niżej).
 
-**Sub-issues i gate.** Sub-issue epika worker zamyka sam po zielonym gate (doc-sync w tym samym
-commicie), bez względu na done-criteria o weryfikacji ręcznej — ta część przechodzi na odbiór epiku.
-Odchylenia od planu idą komentarzem do epiku (brak odchyleń = brak komentarza). Gdy zamknięte
-zostaje ostatnie otwarte sub-issue, worker nakłada `needs-human-test` na epik i komentuje, że jest
+**Sub-issues i gate.** Sub-issue epicu worker zamyka sam po zielonym gate (doc-sync w tym samym
+commicie), bez względu na done-criteria o weryfikacji ręcznej — ta część przechodzi na odbiór epicu.
+Odchylenia od planu idą komentarzem do epicu (brak odchyleń = brak komentarza). Gdy zamknięte
+zostaje ostatnie otwarte sub-issue, worker nakłada `needs-human-test` na epic i komentuje, że jest
 gotowy do odbioru.
 
-**Odbiór epiku.** `needs-human-test` na epiku to bezpiecznik: dopóki jest, pętla nie zaczyna nowej
+**Odbiór epicu.** `needs-human-test` na epicu to bezpiecznik: dopóki jest, pętla nie zaczyna nowej
 pracy. Przechodzisz scenariusz z `## Jak odebrać` i:
 
-- **„zamykaj" / „potwierdzam"** — Claude w sesji robi zamknięcie: doc-sync, merge gałęzi epiku do
-  bazy (jeśli jest), usunięcie gałęzi, zamknięcie epiku;
+- **„zamykaj" / „potwierdzam"** — Claude w sesji robi zamknięcie: doc-sync, merge gałęzi epicu do
+  bazy (jeśli jest), usunięcie gałęzi, zamknięcie epicu;
 - **uwagi** — drobiazg Claude poprawia od razu w sesji; rzecz większa staje się nowym sub-issue
-  `[ISSUE] Poprawka: …` pod epikiem, epik traci label, a pętla ją dokańcza.
+  `[ISSUE] Poprawka: …` pod epicem, epic traci label, a pętla ją dokańcza.
 
-**Wybór pracy.** W trybie pętli, jeśli istnieje **rozpoczęty epik** (co najmniej jedno zamknięte
-sub-issue) z otwartymi sub-issues, selektor dostaje tylko sub-issues najstarszego takiego epiku
-(filtr w `lib.sh`, czysta funkcja) — pętla dokańcza epik, zanim weźmie następny. `ralph-once <nr epiku>`
-pracuje nad sub-issue wskazanego epiku; epik bez otwartych sub-issues daje komunikat i wyjście bez
-workera. Tak przeskakuje się na pilny epik.
+**Wybór pracy.** W trybie pętli, jeśli istnieje **rozpoczęty epic** (co najmniej jedno zamknięte
+sub-issue) z otwartymi sub-issues, selektor dostaje tylko sub-issues najstarszego takiego epicu
+(filtr w `lib.sh`, czysta funkcja) — pętla dokańcza epic, zanim weźmie następny. `ralph-once <nr epicu>`
+pracuje nad sub-issue wskazanego epicu; epic bez otwartych sub-issues daje komunikat i wyjście bez
+workera. Tak przeskakuje się na pilny epic.
 
-**Gałąź per epik** (opcjonalnie, gdy `## Ralph` ma `ralph-base-branch: <baza>`): `ralph-once` przed
-workerem odmawia przy brudnym drzewie, a potem dla sub-issue przełącza się na `epik/<nr epiku>`
-(pierwszy raz tworzy ją z bazy; jeśli baza poszła do przodu, scala ją do gałęzi epiku — konflikt
+**Gałąź per epic** (opcjonalnie, gdy `## Ralph` ma `ralph-base-branch: <baza>`): `ralph-once` przed
+workerem odmawia przy brudnym drzewie, a potem dla sub-issue przełącza się na `epic/<nr epicu>`
+(pierwszy raz tworzy ją z bazy; jeśli baza poszła do przodu, scala ją do gałęzi epicu — konflikt
 przerywa merge, zostawia czyste drzewo i kończy bez workera, kodem 1). Worker commituje na bieżącej
 gałęzi, a repo zostaje na niej pod odbiór lokalny. Wszystko lokalnie, bez `fetch`/`push`; merge
-epiku do bazy po odbiorze robi „zamykaj". Dzięki temu baza zawiera tylko epiki odebrane. Bez tej
+epicu do bazy po odbiorze robi „zamykaj". Dzięki temu baza zawiera tylko epice odebrane. Bez tej
 linii pętla nie przełącza gałęzi.
 
 **Issue bez rodzica** działa po staremu: worker zamyka je po gate, a gdy done-criteria wymagają
@@ -267,18 +267,18 @@ człowieka, zostawia je otwarte z `needs-human-test` i krokami testowymi (sekcja
 ręcznie` z issue); nową pracę pętla bierze dopiero po zamknięciu przez człowieka. Na gałęzi idzie
 ono na bazie.
 
-#### Przykład: hotfix w trakcie epiku
+#### Przykład: hotfix w trakcie epicu
 
-Repo z `ralph-base-branch: dev`. Epik A (#10) jest w toku: zamknięte 1 z 3 sub-issues, repo stoi
-na `epik/10`. Wpada pilna poprawka.
+Repo z `ralph-base-branch: dev`. Epic A (#10) jest w toku: zamknięte 1 z 3 sub-issues, repo stoi
+na `epic/10`. Wpada pilna poprawka.
 
-1. Robisz `/to-issues-ralph` dla poprawki — powstaje epik B (#20) z jednym sub-issue.
-2. `ralph-once 20` — pętla przełącza się na `epik/20` (odbitą z `dev`, bez pracy z epiku A),
+1. Robisz `/to-issues-ralph` dla poprawki — powstaje epic B (#20) z jednym sub-issue.
+2. `ralph-once 20` — pętla przełącza się na `epic/20` (odbitą z `dev`, bez pracy z epicu A),
    worker robi sub-issue i nakłada `needs-human-test` na #20.
-3. Odbierasz #20 wg jego `## Jak odebrać` i mówisz „zamykaj" — merge `epik/20` do `dev`, hotfix
-   jedzie bez połowy epiku A.
-4. Wracasz do pętli (`ralph-once`): selektor widzi rozpoczęty epik A i dokańcza jego sub-issues
-   na `epik/10` (baza z hotfixem jest do niej scalana na starcie runu). Po ostatnim — odbiór A.
+3. Odbierasz #20 wg jego `## Jak odebrać` i mówisz „zamykaj" — merge `epic/20` do `dev`, hotfix
+   jedzie bez połowy epicu A.
+4. Wracasz do pętli (`ralph-once`): selektor widzi rozpoczęty epic A i dokańcza jego sub-issues
+   na `epic/10` (baza z hotfixem jest do niej scalana na starcie runu). Po ostatnim — odbiór A.
 
 ## Odinstalowanie
 

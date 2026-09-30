@@ -89,7 +89,7 @@ language, committing to `main` vs a branch/PR, where to put the detail). If `## 
 nothing about commits, default to a message that records: (1) key decisions made, (2) files
 changed, (3) blockers or notes for the next iteration.
 
-If the loop put you on an epic branch (`epik/<number>`), commit there, on the current branch —
+If the loop put you on an epic branch (`epic/<number>`), commit there, on the current branch —
 even if the `## Ralph` commit conventions name a different branch — and do not switch branches,
 merge, or push.
 
@@ -151,7 +151,7 @@ Apply the done-criteria from `## Ralph` to decide how to close out:
     ```bash
     gh label create needs-human-test --color 5319E7 --description "Implemented; awaiting human verification" 2>/dev/null
     gh issue edit <epic> --add-label needs-human-test
-    gh issue comment <epic> --body "Epik gotowy do odbioru: wszystkie sub-issues zamknięte. Scenariusz w sekcji ## Jak odebrać."
+    gh issue comment <epic> --body "Epic gotowy do odbioru: wszystkie sub-issues zamknięte. Scenariusz w sekcji ## Jak odebrać."
     ```
     Otherwise leave the epic's labels alone.
 - **Gate not green or work unfinished** — same as the "Not complete" path above: leave the

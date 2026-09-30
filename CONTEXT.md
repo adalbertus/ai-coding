@@ -185,7 +185,7 @@ A parent issue grouping the sub-issues produced by one breakdown; the unit of od
 the PRD and the scenario for its odbiór. Its sub-issues are closed on the automated gate alone
 and carry no manual-verification section; the epic awaits odbiór once its last sub-issue closes.
 Every piece of work is an epic, even a one-line change: an epic with a single sub-issue.
-_Avoid_: calling the parent "PRD" — the PRD is only what it happens to carry; the Polish "epik".
+_Avoid_: calling the parent "PRD" — the PRD is only what it happens to carry; the Polish "epic".
 
 **Gałąź bazowa** (base branch):
 The branch a repo's epics start from and are merged back into after odbiór — e.g. `dev` where

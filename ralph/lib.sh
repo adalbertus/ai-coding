@@ -444,8 +444,8 @@ ralph_require_clean_tree() {
 # ralph_base_branch); $2: epic number, empty for an issue without a parent.
 #   - dirty tree (tracked changes or untracked files) -> refuse before touching git;
 #   - no epic -> switch to the base;
-#   - epic -> switch to epik/<n>, creating it from the base on first use; if the base has moved
-#     on, merge it in. A conflicting merge is aborted, leaving a clean tree on epik/<n>.
+#   - epic -> switch to epic/<n>, creating it from the base on first use; if the base has moved
+#     on, merge it in. A conflicting merge is aborted, leaving a clean tree on epic/<n>.
 # Local only: no fetch, no push. rc 0 = ready for the worker; rc 1 = stop (message on stderr).
 ralph_prepare_branch() {
   local base="$1" epic="${2:-}" branch
@@ -459,11 +459,11 @@ ralph_prepare_branch() {
 
   if [ -z "$epic" ]; then
     git checkout -q "$base" || return 1
-    echo "Issue bez epiku — pracuję na gałęzi bazowej $base."
+    echo "Issue bez epicu — pracuję na gałęzi bazowej $base."
     return 0
   fi
 
-  branch="epik/$epic"
+  branch="epic/$epic"
   if ! git rev-parse --verify --quiet "refs/heads/$branch" >/dev/null; then
     git checkout -q -b "$branch" "$base" || return 1
     echo "Utworzyłem gałąź $branch z $base."

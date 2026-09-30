@@ -310,38 +310,38 @@ commit_file() { printf '%s\n' "$2" > "$1"; git add "$1"; git commit -qm "$1: $2"
 
 case_create() {
   ralph_prepare_branch dev 7 || exit 1
-  on_branch epik/7 || exit 1
-  [ "$(git rev-parse epik/7)" = "$(git rev-parse dev)" ]
+  on_branch epic/7 || exit 1
+  [ "$(git rev-parse epic/7)" = "$(git rev-parse dev)" ]
 }
-branch_case "prepare: first run on an epic creates epik/<n> from base" case_create
+branch_case "prepare: first run on an epic creates epic/<n> from base" case_create
 
 case_reuse() {
-  git checkout -q -b epik/7
+  git checkout -q -b epic/7
   commit_file g epic-work
   local epic_head; epic_head=$(git rev-parse HEAD)
   git checkout -q dev
   ralph_prepare_branch dev 7 || exit 1
-  on_branch epik/7 || exit 1
+  on_branch epic/7 || exit 1
   # Base did not move: no merge, the epic's own history is untouched.
   [ "$(git rev-parse HEAD)" = "$epic_head" ]
 }
-branch_case "prepare: later runs switch to the existing epik/<n>" case_reuse
+branch_case "prepare: later runs switch to the existing epic/<n>" case_reuse
 
 case_merge_base() {
-  git checkout -q -b epik/7
+  git checkout -q -b epic/7
   commit_file g epic-work
   git checkout -q dev
   commit_file h hotfix
   ralph_prepare_branch dev 7 || exit 1
-  on_branch epik/7 || exit 1
-  git merge-base --is-ancestor dev epik/7 || exit 1
+  on_branch epic/7 || exit 1
+  git merge-base --is-ancestor dev epic/7 || exit 1
   [ -f g ] && [ -f h ] || exit 1
   [ -z "$(git status --porcelain)" ]
 }
-branch_case "prepare: base moved on -> merged into epik/<n>" case_merge_base
+branch_case "prepare: base moved on -> merged into epic/<n>" case_merge_base
 
 case_conflict() {
-  git checkout -q -b epik/7
+  git checkout -q -b epic/7
   commit_file f epic-side
   local epic_head; epic_head=$(git rev-parse HEAD)
   git checkout -q dev
@@ -351,7 +351,7 @@ case_conflict() {
   grep -q 'Konflikt' <<<"$out" || exit 1
   [ -z "$(git status --porcelain)" ] || exit 1
   [ ! -e "$(git rev-parse --git-path MERGE_HEAD)" ] || exit 1
-  [ "$(git rev-parse epik/7)" = "$epic_head" ] || exit 1
+  [ "$(git rev-parse epic/7)" = "$epic_head" ] || exit 1
   [ "$(cat f)" = "epic-side" ]
 }
 branch_case "prepare: merge conflict -> aborted, clean tree, non-zero, epic untouched" case_conflict
@@ -361,26 +361,26 @@ case_dirty_tracked() {
   local head; head=$(git rev-parse HEAD)
   if ralph_prepare_branch dev 7 2>/dev/null; then exit 1; fi
   on_branch dev || exit 1
-  ! git rev-parse --verify --quiet refs/heads/epik/7 >/dev/null || exit 1
+  ! git rev-parse --verify --quiet refs/heads/epic/7 >/dev/null || exit 1
   [ "$(cat f)" = "edit" ] && [ "$(git rev-parse HEAD)" = "$head" ]
 }
 branch_case "prepare: modified tracked file -> refused before any git operation" case_dirty_tracked
 
 case_dirty_untracked() {
-  git checkout -q -b epik/7
+  git checkout -q -b epic/7
   git checkout -q dev
   commit_file h hotfix
   printf 'x\n' > stray
   if ralph_prepare_branch dev 7 2>/dev/null; then exit 1; fi
-  # Still on dev, epik/7 not merged, the stray file left alone.
+  # Still on dev, epic/7 not merged, the stray file left alone.
   on_branch dev || exit 1
-  ! git merge-base --is-ancestor dev epik/7 || exit 1
+  ! git merge-base --is-ancestor dev epic/7 || exit 1
   [ -f stray ]
 }
 branch_case "prepare: untracked file -> refused, nothing switched or merged" case_dirty_untracked
 
 case_no_parent() {
-  git checkout -q -b epik/7
+  git checkout -q -b epic/7
   commit_file g epic-work
   ralph_prepare_branch dev "" || exit 1
   on_branch dev || exit 1
@@ -393,7 +393,7 @@ case_missing_base() {
   if out=$(ralph_prepare_branch nope 7 2>&1); then exit 1; fi
   grep -q "nope" <<<"$out" || exit 1
   on_branch dev || exit 1
-  ! git rev-parse --verify --quiet refs/heads/epik/7 >/dev/null
+  ! git rev-parse --verify --quiet refs/heads/epic/7 >/dev/null
 }
 branch_case "prepare: missing local base -> refused, no epic branch created" case_missing_base
 

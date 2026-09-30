@@ -131,11 +131,11 @@ Konfiguracja dla współdzielonej pętli Ralpha (`ralph-once` / `ralph-once-loca
 
 Zadanie jest skończone, gdy wszystkie feedback loops są zielone <oraz …>.
 
-Praca idzie w epikach: epik to issue `[PRD]` z sub-issues. Sub-issue epiku zamykasz sam po
+Praca idzie w epicach: epic to issue `[PRD]` z sub-issues. Sub-issue epicu zamykasz sam po
 zielonym gate. <Czego gate nie udowadnia: UI / urządzenie / dane — wpisz konkretnie.> To sprawdza
-człowiek przy odbiorze epiku, nie przy sub-issue: nie nakładaj `needs-human-test` na sub-issue
-i nie pisz dla niego kroków testowych. Odchylenia od planu opisz komentarzem w epiku (brak
-odchyleń = brak komentarza). Po zamknięciu ostatniego sub-issue nałóż na epik `needs-human-test`
+człowiek przy odbiorze epicu, nie przy sub-issue: nie nakładaj `needs-human-test` na sub-issue
+i nie pisz dla niego kroków testowych. Odchylenia od planu opisz komentarzem w epicu (brak
+odchyleń = brak komentarza). Po zamknięciu ostatniego sub-issue nałóż na epic `needs-human-test`
 i skomentuj, że czeka na odbiór.
 
 Issue bez rodzica: <Jeśli dotyczy: zmiany w UI / na urządzeniu / w modułach natywnych NIE są
@@ -147,11 +147,11 @@ sekcji nie ma. Repo, w którym gate dowodzi wszystkiego: zamykaj po zielonym gat
 
 <Tylko gdy repo ma osobną gałąź produkcyjną (epic branch) — cała podsekcja poniżej; inaczej ją pomiń.>
 
-### Gałąź per epik
+### Gałąź per epic
 
 ralph-base-branch: <baza>
 
-Na starcie każdego runu pętla przełącza repo na gałąź epiku `epik/<nr epiku>` (pierwszy raz
+Na starcie każdego runu pętla przełącza repo na gałąź epicu `epic/<nr epicu>` (pierwszy raz
 tworzy ją z bazy, potem scala do niej bazę). Issue bez rodzica idzie na bazie.
 
 ### Doc-sync (trwała dokumentacja — synchronizuj przy zamknięciu issue)
@@ -167,27 +167,27 @@ z tym, co realnie weszło:
 ### Commit
 
 <np. wiadomość po polsku, krótka; commit prosto na `main`, bez brancha/PR; detal w wątku issue.>
-<Epic branch: Gdy pętla postawiła repo na gałęzi epiku (`epik/<nr>`), commit idzie na tę gałąź —
+<Epic branch: Gdy pętla postawiła repo na gałęzi epicu (`epic/<nr>`), commit idzie na tę gałąź —
 także gdy powyżej wskazano inną.>
 
-### Zamknięcie epiku
+### Zamknięcie epicu
 
-Gdy napiszę o epiku z `needs-human-test` „zamykaj" / „potwierdzam" / „zrobione, zamykaj":
+Gdy napiszę o epicu z `needs-human-test` „zamykaj" / „potwierdzam" / „zrobione, zamykaj":
 
 1. <Tylko gdy repo ma doc-sync:> Zsynchronizuj dokumenty statusowe z sekcji Doc-sync (zmianę
-   wyprowadź z treści epiku, jego sub-issues i commitów).
-2. <Epic branch: Scal gałąź epiku `epik/<nr>` do gałęzi bazowej (lokalnie, bez push), usuń gałąź
-   epiku. Konflikt scalenia: zatrzymaj się i opisz go, nie rozstrzygaj sam.>
-3. Zamknij epik.
+   wyprowadź z treści epicu, jego sub-issues i commitów).
+2. <Epic branch: Scal gałąź epicu `epic/<nr>` do gałęzi bazowej (lokalnie, bez push), usuń gałąź
+   epicu. Konflikt scalenia: zatrzymaj się i opisz go, nie rozstrzygaj sam.>
+3. Zamknij epic.
 
 ### Uwagi z odbioru
 
-Gdy przy odbiorze epiku wskażę poprawki:
+Gdy przy odbiorze epicu wskażę poprawki:
 
-- Drobiazg: popraw od razu w tej sesji <Epic branch: na gałęzi epiku> i zrób commit.
-- Rzecz większa: załóż nowe sub-issue `[ISSUE] Poprawka: …` pod tym epikiem (z labelką
-  `ready-for-agent`) i zdejmij z epiku `needs-human-test` — pętla zrobi poprawkę i znów
-  zgłosi epik do odbioru.
+- Drobiazg: popraw od razu w tej sesji <Epic branch: na gałęzi epicu> i zrób commit.
+- Rzecz większa: załóż nowe sub-issue `[ISSUE] Poprawka: …` pod tym epicem (z labelką
+  `ready-for-agent`) i zdejmij z epicu `needs-human-test` — pętla zrobi poprawkę i znów
+  zgłosi epic do odbioru.
 ```
 
 Fill every placeholder. The section the strażnik accepts has **concrete, executable**

@@ -97,7 +97,7 @@ if [ -z "$ISSUE_ARG" ] || [ -n "$EPIC_ARG" ]; then
   if [ -n "$EPIC_ARG" ]; then
     open_count=$(jq -r --argjson e "$EPIC_ARG" '[.[] | select(.number == $e) | .open[]] | length' <<<"$epics")
     if [ "${open_count:-0}" = 0 ]; then
-      echo "Epik #${EPIC_ARG} nie ma otwartych sub-issues — czeka na odbiór albo jest skończony. Nie uruchamiam workera."
+      echo "Epic #${EPIC_ARG} nie ma otwartych sub-issues — czeka na odbiór albo jest skończony. Nie uruchamiam workera."
       exit 0
     fi
   fi
@@ -150,7 +150,7 @@ effort="$RALPH_EFFORT"
 
 echo "Wybrane issue #${num} (complexity:${complexity}) -> $(ralph_model_display "$RALPH_RUNTIME" "$model" "$effort")"
 
-# 4. Epic branch: put the repo on epik/<parent> (merging the base in) or on the base for an
+# 4. Epic branch: put the repo on epic/<parent> (merging the base in) or on the base for an
 #    issue without a parent. The run ends on that branch, ready for local acceptance.
 if [ -n "$base_branch" ]; then
   # Loop/epic mode already knows the parent from the annotated list; explicit mode (or a
@@ -159,7 +159,7 @@ if [ -n "$base_branch" ]; then
   if jq -e --argjson n "$num" 'any(.[]; .number == $n)' <<<"${issues_json:-[]}" >/dev/null 2>&1; then
     parent=$(jq -r --argjson n "$num" 'first(.[] | select(.number == $n) | .parent) // empty' <<<"$issues_json")
   elif ! parent=$(ralph_issue_parent "$num"); then
-    echo "Nie udało się ustalić epiku issue #${num} (gh api); nie przełączam gałęzi, nie uruchamiam workera."
+    echo "Nie udało się ustalić epicu issue #${num} (gh api); nie przełączam gałęzi, nie uruchamiam workera."
     exit 1
   fi
   ralph_prepare_branch "$base_branch" "$parent" || exit 1
