@@ -12,7 +12,7 @@ PLUGIN_MARKETPLACE="$SCRIPT_DIR/.agents/plugins/marketplace.json"
 SKILLS=(zapisz podsumuj sesja sesja-konfiguracja ralph-konfiguracja to-issues-ralph)
 # launcher:ścieżka-względna-do-skryptu — globalny launcher symlinkuje do skryptu w repo.
 # Skrypty samolokują prompty przez realpath, więc działają z dowolnego repo (cwd).
-LAUNCHERS=("ralph-once:ralph/once.sh" "ralph-once-local:ralph/once-local.sh")
+LAUNCHERS=("ralph-once:ralph/once.sh" "ralph-once-local:ralph/once-local.sh" "ralph-epic:ralph/epic.sh")
 
 echo "Instalator: skille Claude/Codex + launchery Ralpha"
 echo "  źródło   : $SCRIPT_DIR"
@@ -71,7 +71,7 @@ done
 # 2. Launchery Ralpha → ~/.local/bin
 echo
 echo "Launchery Ralpha:"
-chmod +x "$SCRIPT_DIR"/ralph/once.sh "$SCRIPT_DIR"/ralph/once-local.sh "$SCRIPT_DIR"/ralph/preflight.sh 2>/dev/null || true
+chmod +x "$SCRIPT_DIR"/ralph/once.sh "$SCRIPT_DIR"/ralph/once-local.sh "$SCRIPT_DIR"/ralph/epic.sh "$SCRIPT_DIR"/ralph/preflight.sh 2>/dev/null || true
 mkdir -p "$BIN_DIR"
 for entry in "${LAUNCHERS[@]}"; do
   name="${entry%%:*}"; rel="${entry#*:}"
@@ -82,7 +82,7 @@ echo
 echo "Gotowe (to instalujesz RAZ, globalnie — nie trzeba powtarzać per repo)."
 echo "  Skille Claude: /zapisz, /podsumuj, /sesja, /sesja-konfiguracja, /ralph-konfiguracja, /to-issues-ralph"
 echo "  Skille Codex:  \$zapisz, \$podsumuj, \$sesja, \$sesja-konfiguracja, \$ralph-konfiguracja, \$to-issues-ralph"
-echo "  Launchery: ralph-once, ralph-once-local (wymagają $BIN_DIR w PATH)"
+echo "  Launchery: ralph-once, ralph-once-local, ralph-epic (wymagają $BIN_DIR w PATH)"
 if [ -f "$PLUGIN_MARKETPLACE" ]; then
   echo "  Codex plugin: repo-local marketplace gotowy pod $PLUGIN_MARKETPLACE"
   echo "                aby użyć pluginu:"

@@ -600,6 +600,33 @@ expect_fail "mark: label already there -> no" ralph_epic_ready_to_mark 3 0 true
 expect_fail "mark: open sub-issues -> no" ralph_epic_ready_to_mark 3 1 false
 expect_fail "mark: epic without any sub-issues -> no" ralph_epic_ready_to_mark 0 0 false
 
+# --- ralph-epic: pure decisions (args: exit code, iterations done, limit, epic ready "true"/"false") ---
+dec() { ralph_epic_decision "$@"; }
+expect_eq "decision: 0 (closed) -> continue" "$(dec 0 1 5 false)" "continue"
+expect_eq "decision: 6 (HITL handed to AFK) -> continue" "$(dec 6 1 5 false)" "continue"
+expect_eq "decision: 4 (discovered HITL) -> continue" "$(dec 4 1 5 false)" "continue"
+expect_eq "decision: 3 (AFK failed) -> stop-afk-failed" "$(dec 3 1 5 false)" "stop-afk-failed"
+expect_eq "decision: 5 (HITL unresolved) -> stop-hitl" "$(dec 5 1 5 false)" "stop-hitl"
+expect_eq "decision: 2 (nothing to do) -> stop-nothing" "$(dec 2 1 5 false)" "stop-nothing"
+expect_eq "decision: 1 (error) -> stop-error" "$(dec 1 1 5 false)" "stop-error"
+expect_eq "decision: unknown code -> stop-error" "$(dec 42 1 5 false)" "stop-error"
+expect_eq "decision: epic ready wins over closed" "$(dec 0 1 5 true)" "stop-ready"
+expect_eq "decision: epic ready wins over nothing to do" "$(dec 2 1 5 true)" "stop-ready"
+expect_eq "decision: epic ready does not hide an error" "$(dec 1 1 5 true)" "stop-error"
+expect_eq "decision: limit reached after a closed issue -> stop-limit" "$(dec 0 5 5 false)" "stop-limit"
+expect_eq "decision: limit exceeded after HITL handed back -> stop-limit" "$(dec 6 6 5 false)" "stop-limit"
+expect_eq "decision: limit does not mask AFK failure" "$(dec 3 5 5 false)" "stop-afk-failed"
+expect_eq "decision: below limit -> continue" "$(dec 0 4 5 false)" "continue"
+expect_eq "limit: twice the open sub-issues" "$(ralph_epic_iteration_limit 3)" "6"
+
+# --- ralph-epic: which epic (same rule as the selector: started first, then lowest number) ---
+E_PICK='[{"number":5,"started":false,"open":[50]},{"number":9,"started":true,"open":[90]},{"number":7,"started":true,"open":[70]},{"number":3,"started":true,"open":[]},{"number":2,"started":false,"open":[]}]'
+expect_eq "pick epic: lowest started with open sub-issues" "$(ralph_pick_epic <<<"$E_PICK")" "7"
+expect_eq "pick epic: none started -> lowest with open sub-issues" \
+  "$(ralph_pick_epic <<<'[{"number":5,"started":false,"open":[50]},{"number":4,"started":false,"open":[40]}]')" "4"
+expect_eq "pick epic: nothing open -> empty" "$(ralph_pick_epic <<<'[{"number":3,"started":true,"open":[]}]')" ""
+expect_eq "pick epic: no epics -> empty" "$(ralph_pick_epic <<<'[]')" ""
+
 echo
 echo "Wynik: $pass OK, $fail FAIL"
 [ "$fail" = 0 ]

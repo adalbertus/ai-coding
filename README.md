@@ -30,7 +30,7 @@ i **idempotentny** (ponowne uruchomienie nie psuje poprawnych symlinków). Tworz
 - skille Claude → `~/.claude/skills`: `zapisz`, `podsumuj`, `sesja`, `sesja-konfiguracja`,
   `ralph-konfiguracja`, `to-issues-ralph`
 - skille Codex → `${CODEX_HOME:-~/.codex}/skills`: te same nazwy, wołane w Codexie jako `$...`
-- launchery → `~/.local/bin`: `ralph-once`, `ralph-once-local`
+- launchery → `~/.local/bin`: `ralph-once`, `ralph-once-local`, `ralph-epic`
 - repo-local plugin Codex → `.agents/plugins/marketplace.json` + `.agents/plugins/plugins/ai-coding`
 
 Źródło zostaje w tym repo, a katalogi skills i `~/.local/bin` tylko linkują — `realpath` rozwija
@@ -299,6 +299,36 @@ runie, nie z wyniku procesu workera):
 | 5 | sesja HITL skończona, issue otwarte i bez `ready-for-agent` (nierozwiązane) |
 | 6 | sesja HITL skończona, issue otwarte z przywróconym `ready-for-agent` (wraca do AFK) |
 
+#### `ralph-epic` — epic od startu do odbioru
+
+`ralph-epic [claude|codex] [nr]` powtarza `ralph-once <epic>` (jedno sub-issue na run, świeży kontekst,
+model z `complexity`), aż epic trafi do odbioru albo pętla musi stanąć. Decyduje wyłącznie na
+podstawie kodów wyjścia `ralph-once` (czysta funkcja `ralph_epic_decision` w `lib.sh`), nie
+własnego zgadywania.
+
+**Kiedy używać:** gdy epic jest gotowy (sub-issues z `to-issues-ralph`) i chcesz go przepchnąć bez
+wołania `ralph-once` za każdym razem. Bez numeru bierze epic tą samą regułą co selektor (rozpoczęty,
+potem najniższy numer) i respektuje bramkę `needs-human-test` — odmawia i wymienia epic czekający
+na odbiór. Z numerem bramkę pomija, jak `ralph-once`. Przy starcie sesji HITL i przy każdym stopie
+wysyła powiadomienie systemowe (`osascript` na macOS; bez niego działa tak samo, tylko bez
+powiadomień).
+
+**Kiedy się zatrzyma i co zrobić:**
+
+| Stop | Komunikat | Co robisz |
+|------|-----------|-----------|
+| epic w odbiorze (kod 0) | „Epic #N gotowy do odbioru” | przechodzisz `## Jak odebrać`, mówisz „zamykaj” albo zgłaszasz uwagi |
+| AFK nie domknęło issue (3) | numer issue i wskazanie komentarza workera | czytasz komentarz i log w `.git/ralph-logs/`, poprawiasz przyczynę (albo issue) i uruchamiasz ponownie; pętla nie pomija issue |
+| HITL nierozwiązane (5) | numer issue | rozstrzygasz: domykasz albo przywracasz `ready-for-agent`, uruchamiasz ponownie |
+| nic do zrobienia (2) | lista otwartych sub-issues (HITL oznaczone) | odblokuj je, dodaj decyzję lub `ready-for-agent`, uruchom ponownie |
+| błąd lub odmowa (1) | przyczyna z komunikatów `ralph-once` | naprawiasz (brudne drzewo, konflikt scalania, lock, strażnik) i uruchamiasz ponownie |
+| limit iteracji (2) | liczba iteracji i lista otwartych | sprawdzasz, czemu epic nie schodzi, i uruchamiasz ponownie |
+
+Sesja HITL rozwiązana (issue domknięte albo z przywróconym `ready-for-agent`) i odkryty HITL
+(kod 4) nie zatrzymują pętli — idzie następna iteracja. Limit iteracji to dwukrotność liczby
+otwartych sub-issues na starcie (zapas na sesję HITL po odkryciu); chroni tylko przed pętlą bez
+końca. Kod: `ralph/epic.sh`; testy: `ralph/test/epic.test.sh` (atrapa `once.sh`, fałszywe `gh`).
+
 **Blokery rozstrzyga skrypt.** Przed selektorem (w pętli i w trybie epicu) `lib.sh` czyta z sekcji
 „Blocked by” każdego kandydata numery issues (`#12` i `12`) i odrzuca kandydata, jeśli którykolwiek
 bloker jest otwarty (czysta funkcja `ralph_filter_unblocked`). Selektor dostaje tylko wolne issues
@@ -336,5 +366,5 @@ na `epic/10`. Wpada pilna poprawka.
 ```bash
 rm ~/.claude/skills/{zapisz,podsumuj,sesja,sesja-konfiguracja,ralph-konfiguracja,to-issues-ralph}
 rm ~/.codex/skills/{zapisz,podsumuj,sesja,sesja-konfiguracja,ralph-konfiguracja,to-issues-ralph}
-rm ~/.local/bin/{ralph-once,ralph-once-local}
+rm ~/.local/bin/{ralph-once,ralph-once-local,ralph-epic}
 ```

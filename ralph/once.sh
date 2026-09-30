@@ -99,16 +99,7 @@ if [ -z "$ISSUE_ARG" ] || [ -n "$EPIC_ARG" ]; then
   #   so the loop only ever picks implementable tracer-bullet slices.
   echo "Pobieram otwarte zadania (ready-for-agent) z GitHuba..."
 
-  # Epic structure: one sub_issues call per open epic -> {number, started, open:[...]}.
-  epics="[]"
-  for e in $(gh issue list --state open --limit 200 --json number,title \
-      --jq '.[] | select(.title | startswith("[PRD]")) | .number' 2>/dev/null); do
-    subs=$(gh api --paginate "repos/{owner}/{repo}/issues/${e}/sub_issues" 2>/dev/null | jq -s -c 'add // []')
-    [ -n "$subs" ] || subs="[]"
-    epics=$(jq -c --argjson e "$e" --argjson subs "$subs" \
-      '. + [{number: $e, started: any($subs[]; .state == "closed"), open: [$subs[] | select(.state == "open") | .number]}]' \
-      <<<"$epics")
-  done
+  epics=$(ralph_epics_json)
 
   if [ -n "$EPIC_ARG" ]; then
     open_count=$(jq -r --argjson e "$EPIC_ARG" '[.[] | select(.number == $e) | .open[]] | length' <<<"$epics")
@@ -185,6 +176,7 @@ ralph_model_for_complexity "$RALPH_RUNTIME" "$complexity"
 model="$RALPH_MODEL"
 effort="$RALPH_EFFORT"
 
+[ -n "${RALPH_ISSUE_FILE:-}" ] && printf '%s\n' "$num" > "$RALPH_ISSUE_FILE"
 echo "Wybrane issue #${num} (complexity:${complexity}) -> $(ralph_model_display "$RALPH_RUNTIME" "$model" "$effort")"
 
 # 4. Epic branch: put the repo on epic/<parent> (merging the base in) or on the base for an
@@ -212,6 +204,7 @@ issue=$(gh issue view "$num" --json number,title,body \
 mode=$(ralph_worker_mode <<<"$labels")
 if [ "$mode" = "hitl" ]; then
   echo "Issue #${num} nie ma ready-for-agent — to HITL: otwieram sesję interaktywną z człowiekiem."
+  [ -n "${RALPH_NOTIFY_HITL:-}" ] && ralph_notify "Ralph: sesja HITL" "Issue #${num} czeka na Ciebie."
   prompt=$(ralph_render_prompt "$RALPH_RUNTIME" "$SCRIPT_DIR/prompt-hitl.md")
 else
   prompt=$(ralph_render_prompt "$RALPH_RUNTIME" "$SCRIPT_DIR/prompt.md")

@@ -13,6 +13,9 @@ ralph_usage() {
     ralph-once-local)
       echo "Użycie: ralph-once-local [claude|codex]"
       ;;
+    ralph-epic)
+      echo "Użycie: ralph-epic [claude|codex] [numer-epicu]"
+      ;;
     *)
       echo "Użycie: ralph-once [claude|codex] [numer-issue]"
       echo "       ralph-once [numer-issue]  # wstecznie kompatybilne: Claude"
@@ -616,6 +619,63 @@ ralph_mark_ready_epics() {
       --jq '.[] | select(.title | startswith("[PRD]")) | .number' 2>/dev/null); do
     ralph_mark_epic_if_ready "$e" || true
   done
+}
+
+# --- ralph-epic: run once.sh over an epic until a stop condition (ADR 0013). ---
+
+# Epic structure: one sub_issues call per open epic -> array of {number, started, open:[...]}.
+ralph_epics_json() {
+  local epics="[]" e subs
+  for e in $(gh issue list --state open --limit 200 --json number,title \
+      --jq '.[] | select(.title | startswith("[PRD]")) | .number' 2>/dev/null); do
+    subs=$(gh api --paginate "repos/{owner}/{repo}/issues/${e}/sub_issues" 2>/dev/null | jq -s -c 'add // []')
+    [ -n "$subs" ] || subs="[]"
+    epics=$(jq -c --argjson e "$e" --argjson subs "$subs" \
+      '. + [{number: $e, started: any($subs[]; .state == "closed"), open: [$subs[] | select(.state == "open") | .number]}]' \
+      <<<"$epics")
+  done
+  printf '%s\n' "$epics"
+}
+
+# Pure. stdin: epics JSON. The epic ralph-epic takes without a number, by the selector's rule:
+# the lowest-numbered started epic with open sub-issues, else the lowest-numbered one with any.
+# Prints the number, or nothing.
+ralph_pick_epic() {
+  jq -r '[.[] | select(.open | length > 0)] as $c
+    | (([$c[] | select(.started) | .number] | min) // ([$c[].number] | min)) // empty'
+}
+
+# Pure. $1: open sub-issues at the start. Every sub-issue takes one run, plus room for a
+# discovered HITL (AFK run, then the HITL session) — so twice as many; the cap only guards
+# against a loop that never ends.
+ralph_epic_iteration_limit() {
+  echo $(( $1 * 2 ))
+}
+
+# Pure. Decision after one once.sh run. $1: its exit code; $2: runs done so far (this one
+# included); $3: limit; $4: "true" when the epic is now awaiting acceptance. Prints `continue`
+# or `stop-<reason>` (ready|afk-failed|hitl|nothing|error|limit). An error is never masked by a
+# ready epic; a failed AFK run is never masked by the limit.
+ralph_epic_decision() {
+  local code="$1" done_runs="$2" limit="$3" ready="$4"
+  case "$code" in
+    "$RALPH_EXIT_ERROR") echo stop-error; return 0 ;;
+    "$RALPH_EXIT_AFK_FAILED") echo stop-afk-failed; return 0 ;;
+    "$RALPH_EXIT_HITL_OPEN") echo stop-hitl; return 0 ;;
+    "$RALPH_EXIT_DONE"|"$RALPH_EXIT_NOTHING"|"$RALPH_EXIT_DISCOVERED"|"$RALPH_EXIT_HITL_TO_AFK") ;;
+    *) echo stop-error; return 0 ;;
+  esac
+  if [ "$ready" = true ]; then echo stop-ready; return 0; fi
+  if [ "$code" = "$RALPH_EXIT_NOTHING" ]; then echo stop-nothing; return 0; fi
+  if [ "$done_runs" -ge "$limit" ]; then echo stop-limit; return 0; fi
+  echo continue
+}
+
+# System notification where available (macOS `osascript`); silently nothing elsewhere.
+ralph_notify() {
+  command -v osascript >/dev/null 2>&1 || return 0
+  local msg="${2//\\/}" title="${1//\\/}"
+  osascript -e "display notification \"${msg//\"/\'}\" with title \"${title//\"/\'}\"" >/dev/null 2>&1 || true
 }
 
 # --- Epic branch (ADR 0012). Opt-in per repo with one line in the "## Ralph" section. ---

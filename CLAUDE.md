@@ -49,6 +49,7 @@ jest stratą, nie zyskiem.
 ```bash
 bash ralph/test/preflight.test.sh
 bash ralph/test/lib.test.sh
+bash ralph/test/epic.test.sh
 ```
 
 Run these after changing `ralph/*.sh` **or `ralph/prompt*.md`**. The model branch is stubbed via
@@ -71,6 +72,7 @@ from this checkout.
 ### Feedback loops (run before every commit — all must be green)
 
 - `bash ralph/test/preflight.test.sh` — preflight strażnik tests (model gate stubbed).
+- `bash ralph/test/epic.test.sh` — `ralph-epic` loop against a dummy `once.sh` and a fake `gh`.
 - `bash ralph/test/lib.test.sh` — lib functions and rendered prompts vs `ralph/test/golden/*`.
   After a deliberate prompt change, regenerate with `UPDATE_GOLDEN=1 bash ralph/test/lib.test.sh`
   and commit the golden diff.
