@@ -262,7 +262,7 @@ zmiana (epic z jednym sub-issue). Terminologia: `CONTEXT.md` (**Epic**, **Odbió
 **Sub-issues i gate.** Sub-issue epicu worker zamyka sam po zielonym gate (doc-sync w tym samym
 commicie), bez względu na done-criteria o weryfikacji ręcznej — ta część przechodzi na odbiór epicu.
 Odchylenia od planu idą komentarzem do epicu (brak odchyleń = brak komentarza). Epic oznacza do odbioru
-skrypt, nie worker: przed wyborem issue i po runie workera pętla sprawdza epiki, a epic bez
+skrypt, nie worker: przed wyborem issue i po runie workera pętla sprawdza epice, a epic bez
 otwartych sub-issues i bez `needs-human-test` dostaje tę etykietę i jeden komentarz — bez względu
 na to, kto zamknął ostatnie sub-issue (też ręcznie). `ralph-once <nr epicu>` na takim epicu
 oznacza go i nie uruchamia workera.
