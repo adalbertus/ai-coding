@@ -269,18 +269,94 @@ ralph_run_claude_worker() {
   return "$rc"
 }
 
+# stdin: Codex `exec --json` lines -> stdout: one short human line per step. A pure filter:
+# command runs become `▸ Bash: cmd` (with `✗ exit N` on failure), file changes `▸ Edit: path`
+# (add -> Write), MCP calls and web searches one line each; the last agent message is printed as
+# the model's summary once the turn completes. Everything else (thread/turn bookkeeping,
+# reasoning, unknown events, unparseable lines) is skipped. Steps are rendered on completion.
+ralph_render_codex_stream() {
+  jq -n -R --unbuffered -r --arg cwd "$PWD/" '
+    def first_line: tostring | split("\n")[0] | ltrimstr($cwd);
+    foreach (inputs | (fromjson? // empty)) as $e ({last: null, out: null};
+      .out = null
+      | if $e.type == "item.completed" then
+          ($e.item // {}) as $i
+          | if $i.type == "agent_message" and ($i.text | type) == "string" then
+              .last = $i.text
+            elif $i.type == "command_execution" then
+              .out = "▸ Bash: \(($i.command // "") | first_line)"
+                + (if ($i.exit_code // 0) != 0 then " ✗ exit \($i.exit_code)" else "" end)
+            elif $i.type == "file_change" then
+              .out = ([($i.changes // [])[]?
+                        | "▸ \(if .kind == "add" then "Write" elif .kind == "delete" then "Delete" else "Edit" end): \((.path // "") | first_line)"]
+                      | join("\n"))
+            elif $i.type == "mcp_tool_call" then
+              .out = "▸ MCP: \($i.server // "")/\($i.tool // "")"
+            elif $i.type == "web_search" then
+              .out = "▸ WebSearch: \(($i.query // "") | first_line)"
+            else . end
+        elif $e.type == "turn.completed" and .last != null then
+          .out = "\n" + .last | .last = null
+        else . end;
+      .out | select(. != null and . != ""))'
+}
+
+# $1: a Codex JSONL log file -> the thread id to hand to `codex resume`.
+ralph_codex_thread_id() {
+  jq -R -r 'fromjson? | select(.type == "thread.started") | .thread_id' "$1" 2>/dev/null | tail -n 1
+}
+
+# Codex worker, unattended: `codex exec --json` with auto-review. Same shape as the Claude
+# worker: full JSONL in <git dir>/ralph-logs/, one line per step on screen, a resume line at the
+# end. The session is persisted (no --ephemeral) so it can be resumed.
+ralph_run_codex_worker() {
+  local model="$1" effort="$2" prompt="$3" label="${4:-run}"
+  local dir log rc id
+  dir=$(git rev-parse --git-path ralph-logs 2>/dev/null) || dir=""
+  if [ -n "$dir" ] && mkdir -p "$dir" 2>/dev/null; then
+    log="$dir/$(date +%Y%m%d-%H%M%S)-${label}.jsonl"
+  else
+    log=$(mktemp)
+  fi
+
+  local args=(exec --json --approve-for-me -C "$PWD")
+  [ -n "$model" ] && args+=(-m "$model")
+  [ -n "$effort" ] && args+=(-c "model_reasoning_effort=\"$effort\"")
+  codex "${args[@]}" "$prompt" 2>/dev/null \
+    | tee "$log" | ralph_render_codex_stream
+  rc=${PIPESTATUS[0]}
+
+  echo
+  echo "Zapis runu: $log"
+  id=$(ralph_codex_thread_id "$log")
+  [ -n "$id" ] && echo "Wznów sesję: codex resume $id"
+  return "$rc"
+}
+
+# Codex HITL session: the interactive CLI with auto-review, so the human can interrupt or add
+# instructions mid-run.
+ralph_run_codex_interactive() {
+  local model="$1" effort="$2" prompt="$3"
+  local args=(--no-alt-screen --approve-for-me -C "$PWD")
+  [ -n "$model" ] && args+=(-m "$model")
+  [ -n "$effort" ] && args+=(-c "model_reasoning_effort=\"$effort\"")
+  codex "${args[@]}" "$prompt"
+}
+
+# $6: mode, `afk` (default, unattended) or `hitl` (interactive; only affects Codex).
 ralph_run_worker() {
-  local runtime="$1" model="$2" effort="$3" prompt="$4" label="${5:-}"
+  local runtime="$1" model="$2" effort="$3" prompt="$4" label="${5:-}" mode="${6:-afk}"
 
   case "$runtime" in
     claude)
       ralph_run_claude_worker "$model" "$effort" "$prompt" "$label"
       ;;
     codex)
-      local args=(--no-alt-screen --approve-for-me -C "$PWD")
-      [ -n "$model" ] && args+=(-m "$model")
-      [ -n "$effort" ] && args+=(-c "model_reasoning_effort=\"$effort\"")
-      codex "${args[@]}" "$prompt"
+      if [ "$mode" = "hitl" ]; then
+        ralph_run_codex_interactive "$model" "$effort" "$prompt"
+      else
+        ralph_run_codex_worker "$model" "$effort" "$prompt" "$label"
+      fi
       ;;
     *)
       echo "Nieznany runtime: $runtime" >&2

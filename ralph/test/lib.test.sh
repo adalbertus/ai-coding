@@ -163,9 +163,9 @@ expect_eq "Codex guard passes approval policy before exec" \
   PATH="$fake_codex_dir/bin:$PATH"
   CODEX_ARGV_CAPTURE="$fake_codex_dir/worker.argv"
   export CODEX_ARGV_CAPTURE
-  ralph_run_worker codex gpt-test low "PROMPT" >/dev/null
+  ralph_run_worker codex gpt-test low "PROMPT" issue-16 hitl >/dev/null
 )
-expect_eq "Codex worker starts interactive CLI with auto-review" \
+expect_eq "Codex HITL worker starts interactive CLI with auto-review" \
   "$(cat "$fake_codex_dir/worker.argv")" \
   $'--no-alt-screen\n--approve-for-me\n-C\n'"$PWD"$'\n-m\ngpt-test\n-c\nmodel_reasoning_effort="low"\nPROMPT'
 
@@ -222,6 +222,62 @@ expect_eq "Claude worker log is written under ralph-logs, git status stays clean
   "$(grep -E '^(status|logs):' <<<"$worker_out" | sed -E 's/[0-9]{8}-[0-9]{6}/STAMP/')" \
   $'status:[]\nlogs:STAMP-issue-12.jsonl'
 rm -rf "$fake_claude_dir" "$claude_repo"
+
+# --- Codex worker: exec stream renderer + unattended adapter ---
+codex_fixture=$(cat <<STREAM
+{"type":"thread.started","thread_id":"thread-abc"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"i0","type":"agent_message","text":"Zaczynam."}}
+{"type":"item.started","item":{"id":"i1","type":"command_execution","command":"bash test.sh","status":"in_progress"}}
+{"type":"item.completed","item":{"id":"i1","type":"command_execution","command":"bash test.sh\\necho second","aggregated_output":"ok","exit_code":0,"status":"completed"}}
+{"type":"item.completed","item":{"id":"i2","type":"command_execution","command":"false","aggregated_output":"","exit_code":1,"status":"failed"}}
+{"type":"item.completed","item":{"id":"i3","type":"file_change","changes":[{"path":"$PWD/greet.sh","kind":"update"},{"path":"/elsewhere/x.md","kind":"add"}],"status":"completed"}}
+{"type":"item.completed","item":{"id":"i4","type":"reasoning","text":"hmm"}}
+{"type":"item.completed","item":{"id":"i5","type":"future_thing","foo":1}}
+not json at all
+{"type":"item.completed","item":{"id":"i6","type":"agent_message","text":"Gotowe: issue zamknięte."}}
+{"type":"turn.completed","usage":{"input_tokens":1}}
+STREAM
+)
+expect_eq "codex renderer: command, failed command, file changes, final message; unknown/garbage skipped" \
+  "$(ralph_render_codex_stream <<<"$codex_fixture")" \
+  $'▸ Bash: bash test.sh\n▸ Bash: false ✗ exit 1\n▸ Edit: greet.sh\n▸ Write: /elsewhere/x.md\n\nGotowe: issue zamknięte.'
+expect_eq "codex renderer: unknown-only stream renders nothing" \
+  "$(ralph_render_codex_stream <<<'{"type":"thread.started","thread_id":"t"}')" ""
+
+fake_cx_dir=$(mktemp -d)
+mkdir "$fake_cx_dir/bin"
+cat > "$fake_cx_dir/bin/codex" <<'FAKE_CODEX'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "$CODEX_ARGV_CAPTURE"
+cat "$CODEX_STREAM_FIXTURE"
+FAKE_CODEX
+chmod +x "$fake_cx_dir/bin/codex"
+printf '%s\n' "$codex_fixture" > "$fake_cx_dir/stream.jsonl"
+
+cx_repo=$(mktemp -d)
+cx_out=$(
+  cd "$cx_repo" || exit 1
+  git init -q
+  PATH="$fake_cx_dir/bin:$PATH"
+  CODEX_ARGV_CAPTURE="$fake_cx_dir/worker.argv"
+  CODEX_STREAM_FIXTURE="$fake_cx_dir/stream.jsonl"
+  export CODEX_ARGV_CAPTURE CODEX_STREAM_FIXTURE
+  ralph_run_worker codex gpt-test low "PROMPT" issue-16
+  echo "status:[$(git status --porcelain)]"
+  echo "logs:$(ls "$(git rev-parse --git-path ralph-logs)")"
+)
+expect_eq "Codex AFK worker runs unattended: exec --json --approve-for-me" \
+  "$(cat "$fake_cx_dir/worker.argv")" \
+  $'exec\n--json\n--approve-for-me\n-C\n'"$cx_repo"$'\n-m\ngpt-test\n-c\nmodel_reasoning_effort="low"\nPROMPT'
+case "$cx_out" in *"codex resume thread-abc"*) r=yes ;; *) r=no ;; esac
+expect_eq "Codex AFK worker prints resume line with the thread id" "$r" "yes"
+case "$cx_out" in *"▸ Bash: bash test.sh"*) r=yes ;; *) r=no ;; esac
+expect_eq "Codex AFK worker shows progress lines on screen" "$r" "yes"
+expect_eq "Codex AFK worker log is under ralph-logs, git status stays clean" \
+  "$(grep -E '^(status|logs):' <<<"$cx_out" | sed -E 's/[0-9]{8}-[0-9]{6}/STAMP/')" \
+  $'status:[]\nlogs:STAMP-issue-16.jsonl'
+rm -rf "$fake_cx_dir" "$cx_repo"
 
 lock_repo=$(mktemp -d)
 (

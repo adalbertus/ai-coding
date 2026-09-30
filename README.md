@@ -186,13 +186,16 @@ z diffem i kieruje do `/ralph-konfiguracja`.
 Claude jedzie **bez nadzoru**: `claude -p` w **auto mode** (`--permission-mode auto`) ze
 strumieniowym wyjściem JSON. Worker kończy się sam po domknięciu issue. Na ekranie widać jedną
 krótką linię na krok (`▸ Bash: bash test.sh`, `▸ Edit: greet.sh`) i na końcu podsumowanie modelu.
-Codex jedzie jako interaktywne `codex --no-alt-screen --approve-for-me` (eskalacje sandboxa idą
-przez automatyczny review). W obu przypadkach celem jest AFK bez `dangerously-bypass-*`.
+Codex też jedzie **bez nadzoru**: `codex exec --json --approve-for-me` (eskalacje sandboxa idą
+przez automatyczny review; flaga jest w `codex exec` od wersji 0.159). Na ekranie ta sama jedna
+linia na krok (`▸ Bash: …`, `▸ Edit: …`, `▸ Write: …`) i podsumowanie modelu. Sesja HITL na
+Codeksie to nadal interaktywne `codex --no-alt-screen --approve-for-me`. W obu runtime'ach celem
+jest AFK bez `dangerously-bypass-*`.
 
-**Zapis runu (Claude).** Pełny strumień JSON ląduje w `.git/ralph-logs/` (plik
+**Zapis runu (Claude i Codex).** Pełny strumień JSON ląduje w `.git/ralph-logs/` (plik
 `<data>-<godzina>-issue-<nr>.jsonl`, dla `ralph-once-local` `…-local.jsonl`). Katalog powstaje
 przy pierwszym runie i leży poza drzewem roboczym, więc nie zmienia `git status`. Na końcu skrypt
-wypisuje `claude --resume <id>` — tą komendą wchodzisz do sesji workera, żeby zobaczyć, co
+wypisuje `claude --resume <id>` (Codex: `codex resume <id>`) — tą komendą wchodzisz do sesji workera, żeby zobaczyć, co
 zrobił, albo go dopytać. Ostrzeżenie o brudnym drzewie po runie działa jak wcześniej.
 
 ### Lock worktree
