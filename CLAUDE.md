@@ -79,15 +79,15 @@ from this checkout.
 
 ### Done-criteria
 
-A task is done when both feedback loops are green and the issue's acceptance criteria are met.
+A task is done when all three feedback loops are green and the issue's acceptance criteria are met.
 
 Work runs in epics: an epic is a `[PRD]` issue with sub-issues. Close a sub-issue yourself once
 the gate is green — including changes to prompts and skills. The gate does not prove how prompts
 and skills behave on a live model, how `ralph/once.sh` behaves against real GitHub, or whether
 `README.md` reads well; the human checks that when accepting the epic, not per sub-issue. Never
 label a sub-issue `needs-human-test` and write no manual test steps for it. Describe deviations
-from the plan in a comment on the epic (no deviations = no comment). After closing the last
-sub-issue, label the epic `needs-human-test` and comment that it awaits acceptance.
+from the plan in a comment on the epic (no deviations = no comment). The loop script labels the
+epic for acceptance, not you.
 
 Issue with no parent: close it yourself once the gate is green; in the closing comment, list any
 deviations from its `## Jak sprawdzić ręcznie` section, or say there are none.
