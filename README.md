@@ -209,7 +209,8 @@ rozstrzygnięta, oddajesz je pętli, przywracając labelkę
 `<data>-<godzina>-issue-<nr>.jsonl`, dla `ralph-once-local` `…-local.jsonl`). Katalog powstaje
 przy pierwszym runie i leży poza drzewem roboczym, więc nie zmienia `git status`. Na końcu skrypt
 wypisuje `claude --resume <id>` (Codex: `codex resume <id>`) — tą komendą wchodzisz do sesji workera, żeby zobaczyć, co
-zrobił, albo go dopytać. Ostrzeżenie o brudnym drzewie po runie działa jak wcześniej.
+zrobił, albo go dopytać. Codex pisze błędy narzędzi tylko na stderr, więc obok JSONL leży
+`…-issue-<nr>.stderr.log`, a gdy są w nim linie `ERROR`, skrypt wypisuje ścieżkę i pierwsze z nich. Ostrzeżenie o brudnym drzewie po runie działa jak wcześniej.
 
 ### Lock worktree
 

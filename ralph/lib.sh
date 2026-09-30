@@ -325,12 +325,19 @@ ralph_run_codex_worker() {
   local args=(exec --json --approve-for-me -C "$PWD")
   [ -n "$model" ] && args+=(-m "$model")
   [ -n "$effort" ] && args+=(-c "model_reasoning_effort=\"$effort\"")
-  codex "${args[@]}" "$prompt" 2>/dev/null \
+  # stderr carries Codex's banner and its tool errors (e.g. a tool host that fails to start),
+  # which never reach the JSONL: keep it next to the log instead of discarding it.
+  local err="${log%.jsonl}.stderr.log"
+  codex "${args[@]}" "$prompt" 2>"$err" \
     | tee "$log" | ralph_render_codex_stream
   rc=${PIPESTATUS[0]}
 
   echo
   echo "Zapis runu: $log"
+  if grep -q 'ERROR' "$err" 2>/dev/null; then
+    echo "Codex zgłosił błędy (stderr): $err"
+    grep 'ERROR' "$err" | sort -u -k2 | head -3 | sed 's/^/  /'
+  fi
   id=$(ralph_codex_thread_id "$log")
   [ -n "$id" ] && echo "Wznów sesję: codex resume $id"
   return "$rc"
