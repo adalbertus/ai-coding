@@ -60,3 +60,38 @@ After a deliberate prompt change, regenerate them and commit the diff:
 ```bash
 UPDATE_GOLDEN=1 bash ralph/test/lib.test.sh
 ```
+
+## Ralph
+
+Configuration for the shared Ralph loop (`ralph-once`).
+
+Run the loop only from a separate worktree on branch `ralph` (e.g. `../ai-coding-ralph`), never
+from this checkout.
+
+### Feedback loops (run before every commit — all must be green)
+
+- `bash ralph/test/preflight.test.sh` — preflight strażnik tests (model gate stubbed).
+- `bash ralph/test/lib.test.sh` — lib functions and rendered prompts vs `ralph/test/golden/*`.
+  After a deliberate prompt change, regenerate with `UPDATE_GOLDEN=1 bash ralph/test/lib.test.sh`
+  and commit the golden diff.
+
+### Done-criteria
+
+A task is done when both feedback loops are green and the issue's acceptance criteria are met.
+The worker closes the issue itself — including changes to prompts and skills; never label
+`needs-human-test`. In the closing comment, list any deviations from the issue's
+`## Jak sprawdzić ręcznie` section (steps that no longer match, extra checks needed), or say
+there are none.
+
+### Doc-sync (durable docs — sync on issue close)
+
+- `README.md` — **status-class** → update it to match what shipped, in the same commit.
+- `CONTEXT.md`, `docs/adr/` — **glossary/design-class** → only flag the needed change in an issue
+  comment; never rewrite them.
+
+### Commit
+
+- Message in Polish, a short subject in the style of `git log`; add a body only when a decision
+  needs explaining.
+- Commit to the current branch (`ralph`); never switch branches, never commit to `main`, no PR.
+  Merging `ralph` into `main` is the human's.
