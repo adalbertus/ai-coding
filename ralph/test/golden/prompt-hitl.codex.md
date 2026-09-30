@@ -77,10 +77,8 @@ First find out whether the issue has a parent (it is then a sub-issue of an epic
 - **Sub-issue of an epic** — the epic is the unit of human acceptance, so close the sub-issue on
   the automated gate alone (`gh issue close`, with summary + commit SHA); no `needs-human-test`
   and no manual test steps on the sub-issue. Deviations from the plan go to the epic
-  (`gh issue comment <epic>`); no deviations, no comment. After closing, if the epic has no open
-  sub-issues left (`gh api repos/{owner}/{repo}/issues/<epic>/sub_issues --jq '[.[] |
-  select(.state=="open")] | length'`), add `needs-human-test` to the epic and comment
-  "Epic gotowy do odbioru: wszystkie sub-issues zamknięte. Scenariusz w sekcji ## Jak odebrać."
+  (`gh issue comment <epic>`); no deviations, no comment. Do not mark the epic for acceptance
+  yourself: the loop script does it once its last sub-issue is closed.
   Gate not green or work unfinished: leave the sub-issue open and comment on progress.
 
 The issue does not get `ready-for-agent` back from you: only the human returns an issue to the

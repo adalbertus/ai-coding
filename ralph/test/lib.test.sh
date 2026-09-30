@@ -567,6 +567,12 @@ expect_eq "unblocked: number after the section is ignored" "$(unblocked "$(mk 1 
 expect_eq "unblocked: keeps order of the free ones" "$(unblocked "$(mk 1 "$(blk '- #12')")" "$(mk 2 "$(blk 'None')")" "$(mk 3 "$(blk '- 5')")")" "2,3"
 expect_eq "unblocked: no open issues -> all pass" "$(printf '%s' "$(mk 1 "$(blk '- #12')")" | jq -cs . | ralph_filter_unblocked '[]' | nums)" "1"
 
+# --- ralph_epic_ready_to_mark: pure decision (total sub-issues, open sub-issues, has label) ---
+expect_ok "mark: all closed, no label -> mark" ralph_epic_ready_to_mark 3 0 false
+expect_fail "mark: label already there -> no" ralph_epic_ready_to_mark 3 0 true
+expect_fail "mark: open sub-issues -> no" ralph_epic_ready_to_mark 3 1 false
+expect_fail "mark: epic without any sub-issues -> no" ralph_epic_ready_to_mark 0 0 false
+
 echo
 echo "Wynik: $pass OK, $fail FAIL"
 [ "$fail" = 0 ]

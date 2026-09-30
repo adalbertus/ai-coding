@@ -150,15 +150,8 @@ Apply the done-criteria from `## Ralph` to decide how to close out:
     — steps in the epic's acceptance scenario that no longer match, extra checks the work turned
     out to need, actual UI labels that differ from the ones assumed — post them with
     `gh issue comment <epic> --body "<deviations>"`. If nothing deviates, write nothing in the epic.
-  - **Last sub-issue?** After closing, check whether the epic still has open sub-issues (e.g.
-    `gh api repos/{owner}/{repo}/issues/<epic>/sub_issues --jq '[.[] | select(.state=="open")] | length'`).
-    If none are open, mark the epic for acceptance:
-    ```bash
-    gh label create needs-human-test --color 5319E7 --description "Implemented; awaiting human verification" 2>/dev/null
-    gh issue edit <epic> --add-label needs-human-test
-    gh issue comment <epic> --body "Epic gotowy do odbioru: wszystkie sub-issues zamknięte. Scenariusz w sekcji ## Jak odebrać."
-    ```
-    Otherwise leave the epic's labels alone.
+  - **Marking the epic for acceptance is not yours.** The loop script labels the epic
+    `needs-human-test` once its last sub-issue is closed; do not label or comment on it for that.
 - **Gate not green or work unfinished** — same as the "Not complete" path above: leave the
   sub-issue open without `needs-human-test` and comment on it with progress.
 

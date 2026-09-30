@@ -22,6 +22,10 @@ ISSUE_ARG="$RALPH_ISSUE_ARG"
 ralph_acquire_lock "${ISSUE_ARG:-selector}" || exit 0
 ralph_trap_release_lock
 
+# Epics whose sub-issues are all closed get `needs-human-test` from here, not from the worker —
+# so it works whoever closed the last one. Done before the gate so it sees the fresh label.
+[ -z "$ISSUE_ARG" ] && ralph_mark_ready_epics
+
 # 0. HARD GATE: never pile up unverified work. If any issue is already implemented and is
 #    waiting for a human to verify it (label `needs-human-test`), stop here and list them —
 #    do NOT pick up new work until they are verified and closed. Inert in repos that do not
@@ -98,6 +102,7 @@ if [ -z "$ISSUE_ARG" ] || [ -n "$EPIC_ARG" ]; then
   if [ -n "$EPIC_ARG" ]; then
     open_count=$(jq -r --argjson e "$EPIC_ARG" '[.[] | select(.number == $e) | .open[]] | length' <<<"$epics")
     if [ "${open_count:-0}" = 0 ]; then
+      ralph_mark_epic_if_ready "$EPIC_ARG" || true
       echo "Epic #${EPIC_ARG} nie ma otwartych sub-issues — czeka na odbiór albo jest skończony. Nie uruchamiam workera."
       exit 0
     fi
@@ -199,6 +204,9 @@ echo "Zaczynam implementację issue #${num} przez runtime ${RALPH_RUNTIME} na $(
 # get the interactive CLI of either runtime instead.
 ralph_run_worker "$RALPH_RUNTIME" "$model" "$effort" \
   "Previous commits: $commits Issue to work (work ONLY this one): $issue $prompt" "issue-${num}" "$mode"
+
+# The worker may have closed the last sub-issue of an epic: mark it for acceptance.
+ralph_mark_ready_epics
 
 # Auto mode denies without prompting, so a run that could not finish (e.g. the commit was
 # blocked) now ends quietly. Uncommitted leftovers would poison the NEXT run — say it out loud.

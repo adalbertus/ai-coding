@@ -135,8 +135,7 @@ Praca idzie w epicach: epic to issue `[PRD]` z sub-issues. Sub-issue epicu zamyk
 zielonym gate. <Czego gate nie udowadnia: UI / urządzenie / dane — wpisz konkretnie.> To sprawdza
 człowiek przy odbiorze epicu, nie przy sub-issue: nie nakładaj `needs-human-test` na sub-issue
 i nie pisz dla niego kroków testowych. Odchylenia od planu opisz komentarzem w epicu (brak
-odchyleń = brak komentarza). Po zamknięciu ostatniego sub-issue nałóż na epic `needs-human-test`
-i skomentuj, że czeka na odbiór.
+odchyleń = brak komentarza). Epic do odbioru oznacza skrypt pętli, nie ty.
 
 Issue bez rodzica: <Jeśli dotyczy: zmiany w UI / na urządzeniu / w modułach natywnych NIE są
 weryfikowalne automatycznie — nie zamykaj takich issue. Oznacz `needs-human-test` i zostaw

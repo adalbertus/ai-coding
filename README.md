@@ -256,13 +256,15 @@ zmiana (epic z jednym sub-issue). Terminologia: `CONTEXT.md` (**Epic**, **Odbió
    Po tym kroku nie musisz nic robić poza uruchomieniem pętli.
 3. **`ralph-once`** (albo `ralph-once-local`) w pętli z terminala — implementacja AFK, jedno
    sub-issue na run.
-4. **Odbiór** — pętla staje raz na epic, gdy worker zamknie ostatnie sub-issue (patrz niżej).
+4. **Odbiór** — pętla staje raz na epic, gdy skrypt oznaczy epic (ostatnie sub-issue zamknięte; patrz niżej).
 
 **Sub-issues i gate.** Sub-issue epicu worker zamyka sam po zielonym gate (doc-sync w tym samym
 commicie), bez względu na done-criteria o weryfikacji ręcznej — ta część przechodzi na odbiór epicu.
-Odchylenia od planu idą komentarzem do epicu (brak odchyleń = brak komentarza). Gdy zamknięte
-zostaje ostatnie otwarte sub-issue, worker nakłada `needs-human-test` na epic i komentuje, że jest
-gotowy do odbioru.
+Odchylenia od planu idą komentarzem do epicu (brak odchyleń = brak komentarza). Epic oznacza do odbioru
+skrypt, nie worker: przed wyborem issue i po runie workera pętla sprawdza epiki, a epic bez
+otwartych sub-issues i bez `needs-human-test` dostaje tę etykietę i jeden komentarz — bez względu
+na to, kto zamknął ostatnie sub-issue (też ręcznie). `ralph-once <nr epicu>` na takim epicu
+oznacza go i nie uruchamia workera.
 
 **Odbiór epicu.** `needs-human-test` na epicu to bezpiecznik: dopóki jest, pętla nie zaczyna nowej
 pracy. Przechodzisz scenariusz z `## Jak odebrać` i:
@@ -304,7 +306,7 @@ na `epic/10`. Wpada pilna poprawka.
 
 1. Robisz `/to-issues-ralph` dla poprawki — powstaje epic B (#20) z jednym sub-issue.
 2. `ralph-once 20` — pętla przełącza się na `epic/20` (odbitą z `dev`, bez pracy z epicu A),
-   worker robi sub-issue i nakłada `needs-human-test` na #20.
+   worker robi sub-issue, a skrypt pętli nakłada `needs-human-test` na #20.
 3. Odbierasz #20 wg jego `## Jak odebrać` i mówisz „zamykaj" — merge `epic/20` do `dev`, hotfix
    jedzie bez połowy epicu A.
 4. Wracasz do pętli (`ralph-once`): selektor widzi rozpoczęty epic A i dokańcza jego sub-issues

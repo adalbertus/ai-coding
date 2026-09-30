@@ -549,6 +549,40 @@ ralph_filter_unblocked() {
         end))'
 }
 
+# Pure decision: should the loop mark an epic for acceptance? $1: total sub-issues, $2: open
+# sub-issues, $3: "true" when the epic already has `needs-human-test`. rc 0 = mark. An epic with
+# no sub-issues is not done, it is unplanned.
+ralph_epic_ready_to_mark() {
+  [ "$1" -gt 0 ] && [ "$2" -eq 0 ] && [ "$3" != true ]
+}
+
+# Thin gh layer over ralph_epic_ready_to_mark. $1: epic number. Labels the epic
+# `needs-human-test` and comments once; an already labelled epic is left alone. Returns 0 when
+# it marked the epic.
+ralph_mark_epic_if_ready() {
+  local epic="$1" subs total open labeled
+  subs=$(gh api --paginate "repos/{owner}/{repo}/issues/${epic}/sub_issues" 2>/dev/null | jq -s -c 'add // []') || return 1
+  [ -n "$subs" ] || return 1
+  total=$(jq 'length' <<<"$subs")
+  open=$(jq '[.[] | select(.state == "open")] | length' <<<"$subs")
+  labeled=$(gh issue view "$epic" --json labels --jq 'any(.labels[]; .name == "needs-human-test")' 2>/dev/null) || return 1
+  ralph_epic_ready_to_mark "$total" "$open" "$labeled" || return 1
+  gh label create needs-human-test --color 5319E7 \
+    --description "Implemented; awaiting human verification" >/dev/null 2>&1 || true
+  gh issue edit "$epic" --add-label needs-human-test >/dev/null 2>&1 || return 1
+  gh issue comment "$epic" --body "Epic gotowy do odbioru: wszystkie sub-issues zamknięte. Scenariusz w sekcji ## Jak odebrać." >/dev/null 2>&1
+  echo "Epic #${epic}: wszystkie sub-issues zamknięte — oznaczony needs-human-test (do odbioru)."
+}
+
+# Runs ralph_mark_epic_if_ready over every open [PRD] issue, whoever closed the last sub-issue.
+ralph_mark_ready_epics() {
+  local e
+  for e in $(gh issue list --state open --limit 200 --json number,title \
+      --jq '.[] | select(.title | startswith("[PRD]")) | .number' 2>/dev/null); do
+    ralph_mark_epic_if_ready "$e" || true
+  done
+}
+
 # --- Epic branch (ADR 0012). Opt-in per repo with one line in the "## Ralph" section. ---
 # Syntax (fixed English key whatever the section's language, so bash reads it reliably), alone on
 # its own line; a leading list marker and backticks around the value are tolerated:
