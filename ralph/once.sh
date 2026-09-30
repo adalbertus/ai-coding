@@ -173,13 +173,14 @@ issue=$(gh issue view "$num" --json number,title,body \
 prompt=$(ralph_render_prompt "$RALPH_RUNTIME" "$SCRIPT_DIR/prompt.md")
 
 echo "Zaczynam implementację issue #${num} przez runtime ${RALPH_RUNTIME} na $(ralph_model_display "$RALPH_RUNTIME" "$model" "$effort")..."
-# Claude uses `auto` (not `acceptEdits`): acceptEdits auto-approves file edits ONLY, so every
+# Claude runs unattended via `claude -p` (stream-json; see ralph_run_claude_worker) and ends on
+# its own once the issue is closed out. It uses `auto` (not `acceptEdits`): acceptEdits auto-approves file edits ONLY, so every
 # Bash call outside the user's allowlist — `git commit`, `gh issue close`, the ## Ralph feedback
 # loops — still stops for approval, and an AFK loop hangs. Auto mode is Claude Code's default:
 # a classifier vets each tool call for risk and prompt injection. Codex uses its interactive CLI
 # with inline output and auto-review, so the human can interrupt or add instructions mid-run.
 ralph_run_worker "$RALPH_RUNTIME" "$model" "$effort" \
-  "Previous commits: $commits Issue to work (work ONLY this one): $issue $prompt"
+  "Previous commits: $commits Issue to work (work ONLY this one): $issue $prompt" "issue-${num}"
 
 # Auto mode denies without prompting, so a run that could not finish (e.g. the commit was
 # blocked) now ends quietly. Uncommitted leftovers would poison the NEXT run — say it out loud.

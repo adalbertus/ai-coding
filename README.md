@@ -183,9 +183,17 @@ strażnik dodatkowo pilnuje, żeby te sekcje były **identyczne** — rozjazd oz
 używany runtime pracuje na nieaktualnych regułach (np. commituje na inną gałąź), więc run pada
 z diffem i kieruje do `/ralph-konfiguracja`.
 
-Claude jedzie w **auto mode** (`--permission-mode auto`). Codex jedzie jako interaktywne
-`codex --no-alt-screen --approve-for-me` (eskalacje sandboxa idą przez automatyczny review).
-W obu przypadkach celem jest AFK bez `dangerously-bypass-*`.
+Claude jedzie **bez nadzoru**: `claude -p` w **auto mode** (`--permission-mode auto`) ze
+strumieniowym wyjściem JSON. Worker kończy się sam po domknięciu issue. Na ekranie widać jedną
+krótką linię na krok (`▸ Bash: bash test.sh`, `▸ Edit: greet.sh`) i na końcu podsumowanie modelu.
+Codex jedzie jako interaktywne `codex --no-alt-screen --approve-for-me` (eskalacje sandboxa idą
+przez automatyczny review). W obu przypadkach celem jest AFK bez `dangerously-bypass-*`.
+
+**Zapis runu (Claude).** Pełny strumień JSON ląduje w `.git/ralph-logs/` (plik
+`<data>-<godzina>-issue-<nr>.jsonl`, dla `ralph-once-local` `…-local.jsonl`). Katalog powstaje
+przy pierwszym runie i leży poza drzewem roboczym, więc nie zmienia `git status`. Na końcu skrypt
+wypisuje `claude --resume <id>` — tą komendą wchodzisz do sesji workera, żeby zobaczyć, co
+zrobił, albo go dopytać. Ostrzeżenie o brudnym drzewie po runie działa jak wcześniej.
 
 ### Lock worktree
 

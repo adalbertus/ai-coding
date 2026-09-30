@@ -38,7 +38,7 @@ prompt=$(ralph_render_prompt "$RALPH_RUNTIME" "$SCRIPT_DIR/prompt-local.md")
 #    the runtime-specific rationale.
 ralph_model_for_complexity "$RALPH_RUNTIME" normal
 ralph_run_worker "$RALPH_RUNTIME" "$RALPH_MODEL" "$RALPH_EFFORT" \
-  "Previous commits: $commits Issues: $issues $prompt"
+  "Previous commits: $commits Issues: $issues $prompt" "local"
 
 # Auto mode denies without prompting, so a run that could not finish (e.g. the commit was
 # blocked) now ends quietly. Uncommitted leftovers would poison the NEXT run — say it out loud.

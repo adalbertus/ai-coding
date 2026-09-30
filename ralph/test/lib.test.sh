@@ -171,6 +171,58 @@ expect_eq "Codex worker starts interactive CLI with auto-review" \
 
 rm -rf "$fake_codex_dir"
 
+# --- Claude worker: stream renderer + unattended adapter ---
+stream_fixture=$(cat <<STREAM
+{"type":"system","subtype":"init","session_id":"sess-123"}
+{"type":"assistant","message":{"content":[{"type":"text","text":"Zaczynam."},{"type":"tool_use","name":"Bash","input":{"command":"bash test.sh\\necho second line"}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","content":"ok"}]}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"$PWD/greet.sh","old_string":"a","new_string":"b"}}]}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":"/elsewhere/x.md","content":"hi"}}]}}
+{"type":"rate_limit_event","foo":1}
+not json at all
+{"type":"result","subtype":"success","result":"Gotowe: issue zamknięte.","session_id":"sess-123"}
+STREAM
+)
+expect_eq "renderer: Bash call, Edit/Write paths, final result; unknown/garbage skipped" \
+  "$(ralph_render_stream <<<"$stream_fixture")" \
+  $'▸ Bash: bash test.sh\n▸ Edit: greet.sh\n▸ Write: /elsewhere/x.md\n\nGotowe: issue zamknięte.'
+expect_eq "renderer: unknown-only stream renders nothing" \
+  "$(ralph_render_stream <<<'{"type":"system","subtype":"init"}')" ""
+
+fake_claude_dir=$(mktemp -d)
+mkdir "$fake_claude_dir/bin"
+cat > "$fake_claude_dir/bin/claude" <<'FAKE_CLAUDE'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "$CLAUDE_ARGV_CAPTURE"
+cat "$CLAUDE_STREAM_FIXTURE"
+FAKE_CLAUDE
+chmod +x "$fake_claude_dir/bin/claude"
+printf '%s\n' "$stream_fixture" > "$fake_claude_dir/stream.jsonl"
+
+claude_repo=$(mktemp -d)
+worker_out=$(
+  cd "$claude_repo" || exit 1
+  git init -q
+  PATH="$fake_claude_dir/bin:$PATH"
+  CLAUDE_ARGV_CAPTURE="$fake_claude_dir/worker.argv"
+  CLAUDE_STREAM_FIXTURE="$fake_claude_dir/stream.jsonl"
+  export CLAUDE_ARGV_CAPTURE CLAUDE_STREAM_FIXTURE
+  ralph_run_worker claude sonnet low "PROMPT" issue-12
+  echo "status:[$(git status --porcelain)]"
+  echo "logs:$(ls "$(git rev-parse --git-path ralph-logs)")"
+)
+expect_eq "Claude worker runs unattended: -p, auto mode, stream-json" \
+  "$(cat "$fake_claude_dir/worker.argv")" \
+  $'-p\n--permission-mode\nauto\n--output-format\nstream-json\n--verbose\n--model\nsonnet\n--effort\nlow\nPROMPT'
+case "$worker_out" in *"claude --resume sess-123"*) r=yes ;; *) r=no ;; esac
+expect_eq "Claude worker prints --resume line with the session id" "$r" "yes"
+case "$worker_out" in *"▸ Bash: bash test.sh"*) r=yes ;; *) r=no ;; esac
+expect_eq "Claude worker shows progress lines on screen" "$r" "yes"
+expect_eq "Claude worker log is written under ralph-logs, git status stays clean" \
+  "$(grep -E '^(status|logs):' <<<"$worker_out" | sed -E 's/[0-9]{8}-[0-9]{6}/STAMP/')" \
+  $'status:[]\nlogs:STAMP-issue-12.jsonl'
+rm -rf "$fake_claude_dir" "$claude_repo"
+
 lock_repo=$(mktemp -d)
 (
   cd "$lock_repo" || exit 1

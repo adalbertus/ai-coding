@@ -220,12 +220,61 @@ ralph_run_model_capture() {
   esac
 }
 
+# stdin: Claude `stream-json` lines -> stdout: one short human line per step. A pure filter:
+# tool calls become `▸ Tool: detail`, the final result is printed as the model's summary,
+# everything else (init, thinking, text, tool results, unparseable lines) is skipped.
+ralph_render_stream() {
+  jq -R --unbuffered -r --arg cwd "$PWD/" '
+    (fromjson? // empty)
+    | if .type == "assistant" then
+        (.message.content // [])[]?
+        | select(.type == "tool_use")
+        | (.input // {}) as $i
+        | ((($i.command // $i.file_path // $i.notebook_path // $i.pattern // $i.path // $i.url // $i.description // "")
+            | tostring | split("\n")[0] | ltrimstr($cwd)) as $d
+          | "▸ \(.name)" + (if $d == "" then "" else ": \($d)" end))
+      elif .type == "result" and (.result | type) == "string" and .result != "" then
+        "\n" + .result
+      else empty end'
+}
+
+# $1: a stream-json log file -> the session id to hand to `claude --resume`.
+ralph_stream_session_id() {
+  jq -R -r 'fromjson? | select(.session_id != null) | .session_id' "$1" 2>/dev/null | tail -n 1
+}
+
+# Claude worker, unattended: `claude -p` in auto mode with a streamed JSON transcript. The
+# full stream lands in <git dir>/ralph-logs/ (outside the work tree, so `git status` stays
+# clean); the screen gets one line per step plus the final summary; the run ends with the
+# `claude --resume <id>` line. $4 labels the log file (issue-<n>, `local`).
+ralph_run_claude_worker() {
+  local model="$1" effort="$2" prompt="$3" label="${4:-run}"
+  local dir log rc id
+  dir=$(git rev-parse --git-path ralph-logs 2>/dev/null) || dir=""
+  if [ -n "$dir" ] && mkdir -p "$dir" 2>/dev/null; then
+    log="$dir/$(date +%Y%m%d-%H%M%S)-${label}.jsonl"
+  else
+    log=$(mktemp)
+  fi
+
+  claude -p --permission-mode auto --output-format stream-json --verbose \
+    --model "$model" --effort "$effort" "$prompt" \
+    | tee "$log" | ralph_render_stream
+  rc=${PIPESTATUS[0]}
+
+  echo
+  echo "Zapis runu: $log"
+  id=$(ralph_stream_session_id "$log")
+  [ -n "$id" ] && echo "Wznów sesję: claude --resume $id"
+  return "$rc"
+}
+
 ralph_run_worker() {
-  local runtime="$1" model="$2" effort="$3" prompt="$4"
+  local runtime="$1" model="$2" effort="$3" prompt="$4" label="${5:-}"
 
   case "$runtime" in
     claude)
-      claude --permission-mode auto --model "$model" --effort "$effort" "$prompt"
+      ralph_run_claude_worker "$model" "$effort" "$prompt" "$label"
       ;;
     codex)
       local args=(--no-alt-screen --approve-for-me -C "$PWD")
