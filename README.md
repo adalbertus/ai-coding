@@ -220,6 +220,12 @@ Sekcję pisze `/ralph-konfiguracja` — nie pisz jej ręcznie.
 urządzeniu), worker zostawia issue otwarte z tą labelką i krokami testowymi; nową pracę pętla
 bierze dopiero po weryfikacji i zamknięciu przez człowieka.
 
+Sub-issue epika worker zamyka sam po zielonym gate (doc-sync w tym samym commicie), bez względu na
+done-criteria o weryfikacji ręcznej — ta część przechodzi na odbiór epika. Odchylenia od planu
+idą komentarzem do epika (brak odchyleń = brak komentarza). Gdy zamknięte zostaje ostatnie
+otwarte sub-issue, worker nakłada `needs-human-test` na epik i komentuje, że jest gotowy do odbioru.
+Issue bez rodzica działa jak wyżej.
+
 ## Odinstalowanie
 
 ```bash
