@@ -111,9 +111,11 @@ When I say "zamykaj" / "potwierdzam" / "zrobione, zamykaj" about an epic labelle
 
 1. If `README.md` does not match what the epic shipped (derive it from the epic, its sub-issues
    and commits), fix it in the `ralph` worktree and commit there.
-2. Close the epic.
+2. Merge `ralph` into `main` in this checkout with `git merge --ff-only ralph` (local, no push).
+   If it is not a fast-forward, stop and describe the divergence; do not resolve it yourself.
+3. Close the epic.
 
-Merging `ralph` into `main` is mine — never do it.
+Merge `ralph` into `main` only in this step or when I ask for it. The loop worker never merges.
 
 ### Acceptance feedback
 
