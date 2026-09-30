@@ -175,7 +175,9 @@ ralph_model_for_complexity() {
 
   case "$runtime:$complexity" in
     claude:heavy)   RALPH_MODEL="opus"; RALPH_EFFORT="high" ;;
-    claude:trivial) RALPH_MODEL="haiku"; RALPH_EFFORT="medium" ;;
+    # Not Haiku: the worker needs auto mode, which Claude Code does not offer on Haiku; without
+    # it every Bash call waits for approval and the AFK loop stalls.
+    claude:trivial) RALPH_MODEL="sonnet"; RALPH_EFFORT="low" ;;
     claude:*)       RALPH_MODEL="sonnet"; RALPH_EFFORT="medium" ;;
 
     codex:heavy)   RALPH_MODEL="${RALPH_CODEX_MODEL_HEAVY:-${RALPH_CODEX_MODEL:-}}"; RALPH_EFFORT="${RALPH_CODEX_EFFORT_HEAVY:-high}" ;;

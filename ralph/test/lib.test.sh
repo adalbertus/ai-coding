@@ -131,6 +131,9 @@ done
 ralph_model_for_complexity claude heavy
 expect_eq "Claude heavy model" "$RALPH_MODEL/$RALPH_EFFORT" "opus/high"
 
+ralph_model_for_complexity claude trivial
+expect_eq "Claude trivial stays on a model with auto mode (not Haiku)" "$RALPH_MODEL/$RALPH_EFFORT" "sonnet/low"
+
 ralph_model_for_complexity codex trivial
 expect_eq "Codex trivial uses config model + low reasoning" "$RALPH_MODEL/$RALPH_EFFORT" "/low"
 

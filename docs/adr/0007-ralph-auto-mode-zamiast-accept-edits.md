@@ -58,5 +58,8 @@ więc istniejąca allowlista nadal skraca drogę.
   rosną, najbardziej przy `complexity:trivial` na Haiku, gdzie narzut jest największy względem
   samej pracy. Nie mierzone; jeśli zaboli, pierwszym krokiem jest allowlista dla narzędzi
   agnostycznych (`Edit`, `Write`), które omijają klasyfikator.
+- **Aktualizacja (2026-09-30):** Claude Code nie oferuje auto mode na Haiku — flaga przepada
+  po cichu i worker czeka na zatwierdzenie każdego polecenia. Dlatego `complexity:trivial`
+  na Claude jedzie teraz na Sonnecie z `effort low`, nie na Haiku.
 - Selektor (`once.sh`) i strażnik (`preflight.sh`) zostają bez zmian — to wywołania `claude -p`
   bez narzędzi, uprawnienia ich nie dotyczą.
