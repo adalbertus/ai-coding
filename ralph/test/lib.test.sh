@@ -61,6 +61,17 @@ expect_fail "ralph-once-local rejects issue arg" ralph_parse_args ralph-once-loc
 expect_ok "ralph-once-local accepts codex runtime" ralph_parse_args ralph-once-local codex
 expect_eq "local codex runtime parsed" "$RALPH_RUNTIME" "codex"
 
+expect_ok "--force-model before the issue number" ralph_parse_args ralph-once --force-model=opus 224
+expect_eq "  forced model parsed" "$RALPH_FORCE_MODEL" "opus"
+expect_eq "  issue still parsed" "$RALPH_ISSUE_ARG" "224"
+expect_ok "--force-model after runtime and epic" ralph_parse_args ralph-epic claude 12 --force-model=sonnet
+expect_eq "  forced model parsed" "$RALPH_FORCE_MODEL/$RALPH_RUNTIME/$RALPH_ISSUE_ARG" "sonnet/claude/12"
+expect_ok "ralph-once-local accepts --force-model" ralph_parse_args ralph-once-local --force-model=sonnet
+expect_ok "no flag -> no forced model (reset between calls)" ralph_parse_args ralph-once 224
+expect_eq "  forced model empty" "$RALPH_FORCE_MODEL" ""
+expect_fail "--force-model rejects an unknown model" ralph_parse_args ralph-once --force-model=haiku 224
+expect_fail "--force-model rejects the codex runtime" ralph_parse_args ralph-once codex --force-model=opus
+
 expect_eq "Claude contract file" "$(ralph_contract_file claude)" "CLAUDE.md"
 expect_eq "Codex contract file" "$(ralph_contract_file codex)" "AGENTS.md"
 expect_eq "Claude tdd skill syntax" "$(ralph_skill_tdd claude)" "/tdd"
@@ -149,6 +160,12 @@ expect_eq "Codex trivial uses config model + low reasoning" "$RALPH_MODEL/$RALPH
 RALPH_CODEX_MODEL_NORMAL="gpt-test" ralph_model_for_complexity codex normal
 expect_eq "Codex normal env model override" "$RALPH_MODEL/$RALPH_EFFORT" "gpt-test/medium"
 unset RALPH_CODEX_MODEL_NORMAL
+
+RALPH_FORCE_MODEL=sonnet ralph_model_for_complexity claude heavy
+expect_eq "--force-model=sonnet overrides heavy, at high effort" "$RALPH_MODEL/$RALPH_EFFORT" "sonnet/high"
+RALPH_FORCE_MODEL=opus ralph_model_for_complexity claude trivial
+expect_eq "--force-model=opus overrides trivial, at high effort" "$RALPH_MODEL/$RALPH_EFFORT" "opus/high"
+RALPH_FORCE_MODEL=""
 
 fake_codex_dir=$(mktemp -d)
 mkdir "$fake_codex_dir/bin"

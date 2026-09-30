@@ -188,7 +188,7 @@ model="$RALPH_MODEL"
 effort="$RALPH_EFFORT"
 
 [ -n "${RALPH_ISSUE_FILE:-}" ] && printf '%s\n' "$num" > "$RALPH_ISSUE_FILE"
-echo "Wybrane issue #${num} (complexity:${complexity}) -> $(ralph_model_display "$RALPH_RUNTIME" "$model" "$effort")"
+echo "Wybrane issue #${num} (complexity:${complexity}) -> $(ralph_model_display "$RALPH_RUNTIME" "$model" "$effort")${RALPH_FORCE_MODEL:+, wymuszone --force-model}"
 
 # 4. Epic branch: put the repo on epic/<parent> (merging the base in) or on the base for an
 #    issue without a parent. The run ends on that branch, ready for local acceptance.

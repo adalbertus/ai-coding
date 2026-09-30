@@ -168,6 +168,7 @@ ralph-once 12           # 12 to epic ([PRD]) → pierwsze wolne z jego otwartych
 ralph-once              # selektor + worker przez Claude
 ralph-once codex        # selektor + worker przez Codex
 ralph-once-local codex  # lokalne issues/*.md przez Codex
+ralph-once 224 --force-model=opus  # Opus z effort high zamiast modelu z complexity:*
 ```
 
 Dwa flavoury, jeden zestaw promptów:
@@ -175,6 +176,10 @@ Dwa flavoury, jeden zestaw promptów:
 - **`ralph-once`** — zadania w GitHub Issues (label `ready-for-agent`). Selektor wybranego
   runtime'u wybiera następne issue, a model worker'a zależy od labelki `complexity:*`.
 - **`ralph-once-local`** — zadania w plikach `issues/*.md`, bez selektora GitHub.
+
+**`--force-model=sonnet|opus`** (wszystkie trzy komendy, tylko Claude) pomija etykietę
+`complexity:*`: każde issue jedzie na wskazanym modelu z effort high, także sesja HITL. Flaga może
+stać w dowolnym miejscu. Strażnik i selektor zostają na Haiku. Z Codeksem run odmawia startu.
 
 Oba zaczynają od **strażnika** (`ralph/preflight.sh`, fail-closed): repo musi mieć gotową sekcję
 `## Ralph` w natywnym pliku runtime'u (`CLAUDE.md` dla Claude, `AGENTS.md` dla Codex), inaczej
@@ -304,7 +309,7 @@ runie, nie z wyniku procesu workera):
 #### `ralph-epic` — epic od startu do odbioru
 
 `ralph-epic [claude|codex] [nr]` powtarza `ralph-once <epic>` (jedno sub-issue na run, świeży kontekst,
-model z `complexity`), aż epic trafi do odbioru albo pętla musi stanąć. Decyduje wyłącznie na
+model z `complexity` albo z `--force-model`, które przekazuje każdemu runowi), aż epic trafi do odbioru albo pętla musi stanąć. Decyduje wyłącznie na
 podstawie kodów wyjścia `ralph-once` (czysta funkcja `ralph_epic_decision` w `lib.sh`), nie
 własnego zgadywania.
 

@@ -83,6 +83,10 @@ expect_eq "  notification sent at the stop" "$(grep -c 'display notification' "$
 run $'0 12\n0 13 ready' codex 10
 expect_eq "codex runtime is passed on" "$(head -1 "$FAKE/once-args")" "codex 10"
 
+run $'0 12\n0 13 ready' 10 --force-model=opus
+expect_eq "--force-model is passed on to every run" "$(grep -c -- '--force-model=opus' "$FAKE/once-args")" "2"
+expect "  and named in the start line" 0 "model wymuszony: opus/high"
+
 # HITL solved (0) and handed back (6) both go on.
 run $'6 13\n0 13 ready' 10
 expect "HITL handed back -> next run, then ready" 0 "gotowy do odbioru"

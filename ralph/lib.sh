@@ -4,6 +4,7 @@
 
 RALPH_RUNTIME=""
 RALPH_ISSUE_ARG=""
+RALPH_FORCE_MODEL=""
 RALPH_LOCK_DIR=""
 RALPH_LOCK_OWNED=0
 
@@ -11,16 +12,18 @@ ralph_usage() {
   local launcher="$1"
   case "$launcher" in
     ralph-once-local)
-      echo "Użycie: ralph-once-local [claude|codex]"
+      echo "Użycie: ralph-once-local [claude|codex] [--force-model=sonnet|opus]"
       ;;
     ralph-epic)
-      echo "Użycie: ralph-epic [claude|codex] [numer-epicu]"
+      echo "Użycie: ralph-epic [claude|codex] [numer-epicu] [--force-model=sonnet|opus]"
       ;;
     *)
-      echo "Użycie: ralph-once [claude|codex] [numer-issue]"
+      echo "Użycie: ralph-once [claude|codex] [numer-issue] [--force-model=sonnet|opus]"
       echo "       ralph-once [numer-issue]  # wstecznie kompatybilne: Claude"
       ;;
   esac
+  echo "  --force-model=sonnet|opus  jeden model Claude z effort high dla każdego issue,"
+  echo "                             zamiast modelu z etykiety complexity:*"
 }
 
 ralph_parse_args() {
@@ -29,6 +32,17 @@ ralph_parse_args() {
 
   RALPH_RUNTIME="${RALPH_DEFAULT_RUNTIME:-claude}"
   RALPH_ISSUE_ARG=""
+  RALPH_FORCE_MODEL=""
+
+  # --force-model=<model> may stand anywhere; the positional arguments are what is left.
+  local rest=() arg force=""
+  for arg in "$@"; do
+    case "$arg" in
+      --force-model=*) force="${arg#--force-model=}" ;;
+      *) rest+=("$arg") ;;
+    esac
+  done
+  set -- ${rest[@]+"${rest[@]}"}
 
   if [ "${1:-}" = "claude" ] || [ "${1:-}" = "codex" ]; then
     RALPH_RUNTIME="$1"
@@ -55,6 +69,20 @@ ralph_parse_args() {
       fi
       ;;
   esac
+
+  case "$force" in
+    ""|sonnet|opus) ;;
+    *)
+      echo "--force-model przyjmuje sonnet albo opus, nie '${force}'." >&2
+      ralph_usage "$launcher" >&2
+      return 1
+      ;;
+  esac
+  if [ -n "$force" ] && [ "$RALPH_RUNTIME" != claude ]; then
+    echo "--force-model działa tylko z runtime'em claude (sonnet i opus to modele Claude)." >&2
+    return 1
+  fi
+  RALPH_FORCE_MODEL="$force"
 }
 
 ralph_contract_file() {
@@ -187,6 +215,12 @@ ralph_model_for_complexity() {
     codex:trivial) RALPH_MODEL="${RALPH_CODEX_MODEL_TRIVIAL:-${RALPH_CODEX_MODEL:-}}"; RALPH_EFFORT="${RALPH_CODEX_EFFORT_TRIVIAL:-low}" ;;
     codex:*)       RALPH_MODEL="${RALPH_CODEX_MODEL_NORMAL:-${RALPH_CODEX_MODEL:-}}"; RALPH_EFFORT="${RALPH_CODEX_EFFORT_NORMAL:-medium}" ;;
   esac
+
+  # --force-model: one Claude model for every tier, always at high effort.
+  if [ -n "${RALPH_FORCE_MODEL:-}" ] && [ "$runtime" = claude ]; then
+    RALPH_MODEL="$RALPH_FORCE_MODEL"
+    RALPH_EFFORT="high"
+  fi
 }
 
 ralph_model_display() {

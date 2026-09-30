@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# ralph-epic [claude|codex] [nr]: carries one epic from start to acceptance by repeating
+# ralph-epic [claude|codex] [nr] [--force-model=sonnet|opus]: carries one epic from start to acceptance by repeating
 # `ralph-once <epic>` (one sub-issue per run, fresh context) — ADR 0013. It decides only from
 # once.sh's exit-code contract (see the header of once.sh); the decision is the pure function
 # ralph_epic_decision in lib.sh.
@@ -48,7 +48,7 @@ fi
 
 open_count=$(jq -r --argjson e "$epic" '[.[] | select(.number == $e) | .open[]] | length' <<<"$epics")
 limit=$(ralph_epic_iteration_limit "${open_count:-0}")
-echo "ralph-epic: epic #${epic}, otwartych sub-issues: ${open_count:-0}, limit iteracji: ${limit} (runtime ${runtime})."
+echo "ralph-epic: epic #${epic}, otwartych sub-issues: ${open_count:-0}, limit iteracji: ${limit} (runtime ${runtime}${RALPH_FORCE_MODEL:+, model wymuszony: $RALPH_FORCE_MODEL/high})."
 
 # Open sub-issues of the epic as "  #n: title (HITL)" lines.
 open_list() {
@@ -65,7 +65,8 @@ while :; do
   : > "$issue_file"
   echo
   echo "── ralph-epic: iteracja ${runs}/${limit} ──"
-  RALPH_ISSUE_FILE="$issue_file" RALPH_NOTIFY_HITL=1 "$once_cmd" "$runtime" "$epic"
+  RALPH_ISSUE_FILE="$issue_file" RALPH_NOTIFY_HITL=1 "$once_cmd" "$runtime" "$epic" \
+    ${RALPH_FORCE_MODEL:+"--force-model=$RALPH_FORCE_MODEL"}
   code=$?
   issue=$(head -1 "$issue_file")
   ready=$(gh issue view "$epic" --json labels --jq 'any(.labels[]; .name == "needs-human-test")' 2>/dev/null)
