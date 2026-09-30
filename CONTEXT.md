@@ -156,22 +156,33 @@ complexity→model mapping lives only in the loop script, so labels stay stable 
 _Avoid_: putting a model name in the label; conflating it with blast radius.
 
 **needs-human-test**:
-A task already implemented but awaiting a human to verify it (e.g. on a real device). While one
-is open, the GitHub loop refuses to start new work. Applied by the worker after implementation,
-never at triage.
+An epic whose last sub-issue has closed, awaiting odbiór — or, for a task with no epic, a task
+implemented but awaiting a human to verify it. While one is open, the GitHub loop refuses to start
+new work. Applied by the worker after implementation, never at triage.
+
+**Odbiór** (acceptance):
+A human judging whether what shipped is what they *want* — layout, wording, placement, "actually,
+differently". Distinct from *verifying* that it works as specified, which belongs to the
+automated gate. Only odbiór is inherently human; it is done once per epic, not per task.
+_Avoid_: using "manual test" for both; treating odbiór as a gap an e2e suite will close.
 
 **AFK / HITL**:
 AFK = a task fit to run unsupervised (label `ready-for-agent`); HITL = one needing a human
 decision (won't carry the label). The selektor and worker only touch AFK tasks.
 
 **PRD** (product requirements doc):
-In this repo, an **ephemeral** synthesis of a finished grill, produced only as input to the
-issue breakdown and materialized **in-session** (in context) — never published to the tracker,
-never written to a file, and never read again after breakdown. Its value is entirely up-front:
-it denoises a long grill session into a clean one-page input and supplies the exhaustive
-user-story list the breakdown uses as a coverage checklist. Zob. `docs/adr/0008`.
-_Avoid_: treating it as a durable artifact, a published parent issue, a `tmp/` file, or a spec
-anyone reads later.
+In this repo, a synthesis of a finished grill whose value is entirely up-front: it denoises a
+long grill session into a clean one-page input and supplies the exhaustive user-story list the
+breakdown uses as a coverage checklist. Nobody reads it afterwards; it is stored as the body of
+the epic only because that issue exists anyway, so storing it costs nothing.
+_Avoid_: treating it as a spec anyone reads later, a `tmp/` file, or a reason to publish anything.
+
+**Epik** (epic):
+A parent issue grouping the sub-issues produced by one breakdown; the unit of odbiór. It carries
+the PRD and the scenario for its odbiór. Its sub-issues are closed on the automated gate alone
+and carry no manual-verification section; the epic awaits odbiór once its last sub-issue closes.
+Every piece of work is an epic, even a one-line change: an epic with a single sub-issue.
+_Avoid_: calling the parent "PRD" — the PRD is only what it happens to carry.
 
 ## Sesja deliberacyjna (`/sesja`)
 

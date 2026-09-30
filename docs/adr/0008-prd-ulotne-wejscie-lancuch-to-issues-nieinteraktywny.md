@@ -1,5 +1,7 @@
 # PRD jako ulotne wejście — łańcuch `to-issues-ralph` nieinteraktywny
 
+_Zmienione przez ADR 0012 (epik jako jednostka odbioru)._
+
 **Kontekst.** Po sesji `/grill-with-docs` zawsze uruchamiałem tę samą sekwencję:
 `/to-prd` → `/to-issues-ralph`. Oba skille mają interaktywne checkpointy (`to-prd` krok 2:
 „sprawdź z użytkownikiem, które moduły…"; `to-issues` krok 4: „przepytaj użytkownika…

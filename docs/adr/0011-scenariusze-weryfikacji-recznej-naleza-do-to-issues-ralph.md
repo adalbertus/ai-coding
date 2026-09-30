@@ -1,5 +1,7 @@
 # Scenariusze weryfikacji ręcznej należą do `to-issues-ralph`, nie do workera
 
+_Zmienione przez ADR 0012 (epik jako jednostka odbioru)._
+
 **Kontekst.** Ta sama robota była robiona dwa razy. `to-issues-ralph` wpisuje sekcję
 `## Jak sprawdzić ręcznie` do body issue w momencie zakładania — mocnym modelem, z całym planem
 w kontekście. Potem prompt Ralpha kazał workerowi napisać „concrete, step-by-step manual test
