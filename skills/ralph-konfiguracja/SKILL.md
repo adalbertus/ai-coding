@@ -21,8 +21,9 @@ the user before writing.
 1. A `## Ralph` section in the repo's `CLAUDE.md` (created if the file is absent), with the
    same section mirrored into `AGENTS.md` (created if absent). It contains the parts the
    strażnik checks for — **feedback loops** + **done-criteria** (required) — plus **commit
-   conventions** and **doc-sync** (both recommended; doc-sync only if the repo keeps durable docs
-   it can invalidate).
+   conventions**, **epic closing**, and **acceptance notes** (all recommended), **doc-sync** (only
+   if the repo keeps durable docs it can invalidate), and an optional **epic-branch line** (only
+   for a repo with a separate production branch).
 2. The GitHub labels the loop relies on — **only** for GitHub-backed repos.
 3. Where it applies: a **reworded** instruction elsewhere in `CLAUDE.md` / `AGENTS.md`, so agents
    consult large reference files instead of reading them whole (proposed to the user, never
@@ -47,15 +48,24 @@ the strażnik's model gate marks the section MISSING if the loops are vague or p
 
 ### 2. Decide the done-criteria
 
-The key question: **can the automated gate fully prove correctness, or does some work need a
-human?** This drives how the worker closes issues (see `ralph/prompt.md` → THE ISSUE).
+Work runs in **epics**: a `[PRD]` parent issue with sub-issues. The worker closes a sub-issue
+itself once the gate is green; whatever the gate cannot prove is checked by a human at the
+**acceptance of the epic** (`needs-human-test` lands on the epic after its last sub-issue), not
+per sub-issue. An issue without a parent keeps the older rule: `needs-human-test` + a manual
+scenario. The done-criteria you write must carry both rules.
+
+The key question: **what does the automated gate NOT prove?** Name it concretely (UI, device,
+native modules, real data); that is what acceptance covers. A repo where the gate proves
+everything (Laravel API, a TS package) has nothing to name — parentless issues then close on a
+green gate.
 
 - **Backend / library / pure-logic repo** (e.g. Laravel API, a TS package) — gate-green is
   enough; the worker may close issues itself.
 - **App with UI / device / native surface** (e.g. RN + Expo) — logic fully covered by the
-  gate may be closed; anything touching UI or native modules **cannot** be proven by the gate
-  and must be handed to a human via `needs-human-test`. If so, also state the convention for
-  the manual test steps (language, and that they must reference real UI labels).
+  gate may be closed; anything touching UI or native modules **cannot** be proven by the gate.
+  In an epic that goes to acceptance; a parentless issue must be handed to a human via
+  `needs-human-test`. If so, also state the convention for the manual test steps (language, and
+  that they must reference real UI labels).
 
 Write the criteria as concrete sentences, not "when it works".
 
@@ -84,6 +94,17 @@ Capture anything non-default so the worker matches the repo: message **language*
 **`main`** vs a **branch/PR**, and where the detail goes (commit body vs issue thread). If the
 repo has no special convention, you may omit this part — the prompt has a sensible fallback.
 
+**Epic branch (optional).** Ask the user whether the repo has a **separate production branch**
+(e.g. `main` = production, `dev` = working branch; check `git branch -a` and CI/deploy config
+first, then confirm). Recommend the option only when it does: there, half an epic on the base
+branch would block a hotfix. Ask as a chat question with your recommendation and reasoning.
+
+- **Yes** — record the base branch (`dev`) and write the epic-branch line and the commit /
+  epic-closing notes marked "epic branch" in the template.
+- **No** (trunk-only, or unsure) — write none of it: no line, and no sentence anywhere in the
+  section that names the key. The loop reads that key from the whole section, so any other
+  mention of it — even in prose — halts the run.
+
 ### 5. Write the `## Ralph` section
 
 Create `CLAUDE.md` and `AGENTS.md` if missing. If a `## Ralph` section already exists in either
@@ -109,11 +130,29 @@ Konfiguracja dla współdzielonej pętli Ralpha (`ralph-once` / `ralph-once-loca
 ### Done-criteria
 
 Zadanie jest skończone, gdy wszystkie feedback loops są zielone <oraz …>.
-<Jeśli dotyczy: Zmiany w UI / na urządzeniu / w modułach natywnych NIE są weryfikowalne
-automatycznie — nie zamykaj takich issue. Oznacz `needs-human-test` i zostaw człowiekowi kroki
-testowe po polsku. Jeśli issue ma już sekcję `## Jak sprawdzić ręcznie` — NIE przepisuj jej;
-wskaż ją i dopisz wyłącznie odchylenia (kroki, które przestały pasować, realne etykiety UI inne
-niż założone). Pełny scenariusz pisz od zera tylko wtedy, gdy issue takiej sekcji nie ma.>
+
+Praca idzie w epikach: epik to issue `[PRD]` z sub-issues. Sub-issue epiku zamykasz sam po
+zielonym gate. <Czego gate nie udowadnia: UI / urządzenie / dane — wpisz konkretnie.> To sprawdza
+człowiek przy odbiorze epiku, nie przy sub-issue: nie nakładaj `needs-human-test` na sub-issue
+i nie pisz dla niego kroków testowych. Odchylenia od planu opisz komentarzem w epiku (brak
+odchyleń = brak komentarza). Po zamknięciu ostatniego sub-issue nałóż na epik `needs-human-test`
+i skomentuj, że czeka na odbiór.
+
+Issue bez rodzica: <Jeśli dotyczy: zmiany w UI / na urządzeniu / w modułach natywnych NIE są
+weryfikowalne automatycznie — nie zamykaj takich issue. Oznacz `needs-human-test` i zostaw
+człowiekowi kroki testowe po polsku. Jeśli issue ma już sekcję `## Jak sprawdzić ręcznie` — NIE
+przepisuj jej; wskaż ją i dopisz wyłącznie odchylenia (kroki, które przestały pasować, realne
+etykiety UI inne niż założone). Pełny scenariusz pisz od zera tylko wtedy, gdy issue takiej
+sekcji nie ma. Repo, w którym gate dowodzi wszystkiego: zamykaj po zielonym gate.>
+
+<Tylko gdy repo ma osobną gałąź produkcyjną (epic branch) — cała podsekcja poniżej; inaczej ją pomiń.>
+
+### Gałąź per epik
+
+ralph-base-branch: <baza>
+
+Na starcie każdego runu pętla przełącza repo na gałąź epiku `epik/<nr epiku>` (pierwszy raz
+tworzy ją z bazy, potem scala do niej bazę). Issue bez rodzica idzie na bazie.
 
 ### Doc-sync (trwała dokumentacja — synchronizuj przy zamknięciu issue)
 
@@ -125,17 +164,41 @@ z tym, co realnie weszło:
 - `CONTEXT.md`, `docs/adr/` — **słownikowe/projektowe** → tylko zgłoś potrzebę zmiany
   (komentarz w issue), NIE przepisuj; słownikiem rządzi grill, nie pętla.
 
-Gdy zamykam ręcznie issue z `needs-human-test` („potwierdzam" / „zamykaj" / „zrobione,
-zamykaj"): potraktuj to jako sygnał — najpierw zsynchronizuj dokumenty statusowe (zmianę
-wyprowadź z treści issue i jego commitów), dopiero potem zamknij.
-
 ### Commit
 
 <np. wiadomość po polsku, krótka; commit prosto na `main`, bez brancha/PR; detal w wątku issue.>
+<Epic branch: Gdy pętla postawiła repo na gałęzi epiku (`epik/<nr>`), commit idzie na tę gałąź —
+także gdy powyżej wskazano inną.>
+
+### Zamknięcie epiku
+
+Gdy napiszę o epiku z `needs-human-test` „zamykaj" / „potwierdzam" / „zrobione, zamykaj":
+
+1. <Tylko gdy repo ma doc-sync:> Zsynchronizuj dokumenty statusowe z sekcji Doc-sync (zmianę
+   wyprowadź z treści epiku, jego sub-issues i commitów).
+2. <Epic branch: Scal gałąź epiku `epik/<nr>` do gałęzi bazowej (lokalnie, bez push), usuń gałąź
+   epiku. Konflikt scalenia: zatrzymaj się i opisz go, nie rozstrzygaj sam.>
+3. Zamknij epik.
+
+### Uwagi z odbioru
+
+Gdy przy odbiorze epiku wskażę poprawki:
+
+- Drobiazg: popraw od razu w tej sesji <Epic branch: na gałęzi epiku> i zrób commit.
+- Rzecz większa: załóż nowe sub-issue `[ISSUE] Poprawka: …` pod tym epikiem (z labelką
+  `ready-for-agent`) i zdejmij z epiku `needs-human-test` — pętla zrobi poprawkę i znów
+  zgłosi epik do odbioru.
 ```
 
 Fill every placeholder. The section the strażnik accepts has **concrete, executable**
 instructions for both feedback loops and done-criteria.
+
+The `<Epic branch: …>` and `ralph-base-branch` parts are written only when the user chose the
+epic branch in step 4; otherwise drop them entirely (drop the `<…>` marker text either way — it
+is instruction to you, not part of the section). `ralph-base-branch: <baza>` must stay alone on
+its own line with the real branch name (e.g. `ralph-base-branch: dev`), and appear exactly once —
+the loop parses it and halts on any other mention of the key in the section. Do not write
+rationale or pointers to files outside the target repo into the section.
 
 ### 6. Create the loop's GitHub labels (GitHub-backed repos only)
 
@@ -145,7 +208,7 @@ triage skill rely on. Skip this entirely for local-files repos (those driven by
 
 ```bash
 gh label create ready-for-agent  --color 0E8A16 --description "AFK-ready: safe for the autonomous loop to pick up" 2>/dev/null
-gh label create needs-human-test --color 5319E7 --description "Implemented; awaiting human verification" 2>/dev/null
+gh label create needs-human-test --color 5319E7 --description "Epic awaiting human acceptance (parentless issue: awaiting verification)" 2>/dev/null
 gh label create complexity:heavy   --color B60205 --description "Highest-capability model" 2>/dev/null
 gh label create complexity:normal  --color FBCA04 --description "Default model" 2>/dev/null
 gh label create complexity:trivial --color 0E8A16 --description "Cheapest model — mechanical only" 2>/dev/null

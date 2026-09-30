@@ -73,7 +73,22 @@ language, committing to `main` vs a branch/PR, where to put the detail). If `## 
 nothing about commits, default to a message that records: (1) key decisions made, (2) files
 changed, (3) blockers or notes for the next iteration.
 
+If the loop put you on an epic branch (`epik/<number>`), commit there, on the current branch —
+even if the `## Ralph` commit conventions name a different branch — and do not switch branches,
+merge, or push.
+
 # THE ISSUE
+
+First find out whether the issue has a parent (it is then a sub-issue of an epic):
+`gh api repos/{owner}/{repo}/issues/<number>/parent --jq .number` (a 404 / no output means no
+parent; `gh issue view <number> --json parent` is fine if your `gh` supports it). Then pick the path:
+
+- **Issue with no parent** — apply the done-criteria from `## Ralph` as described below.
+- **Sub-issue of an epic** — follow SUB-ISSUE OF AN EPIC below instead. The epic is the unit of
+  human acceptance, so this issue is closed on the automated gate alone, whatever the `## Ralph`
+  done-criteria say about manual verification (that human part moves to the epic).
+
+## Issue with no parent
 
 Apply the done-criteria from `## Ralph` to decide how to close out:
 
@@ -104,6 +119,27 @@ Apply the done-criteria from `## Ralph` to decide how to close out:
 - **Not complete** (gate not green, or work unfinished) — leave the issue open WITHOUT the
   `needs-human-test` label and record progress:
   `gh issue comment <number> --body "<what was done, what remains, blockers for next iteration>"`.
+
+## SUB-ISSUE OF AN EPIC
+
+- **Gate green** — do DOC-SYNC (edits go into the same commit), commit, then close the sub-issue
+  with `gh issue close <number> --comment "<summary of what shipped + the commit SHA>"`. Do not add
+  `needs-human-test` to the sub-issue and do not write manual test instructions for it.
+  - **Deviations go to the epic, not the sub-issue.** If the implementation deviated from the plan
+    — steps in the epic's acceptance scenario that no longer match, extra checks the work turned
+    out to need, actual UI labels that differ from the ones assumed — post them with
+    `gh issue comment <epic> --body "<deviations>"`. If nothing deviates, write nothing in the epic.
+  - **Last sub-issue?** After closing, check whether the epic still has open sub-issues (e.g.
+    `gh api repos/{owner}/{repo}/issues/<epic>/sub_issues --jq '[.[] | select(.state=="open")] | length'`).
+    If none are open, mark the epic for acceptance:
+    ```bash
+    gh label create needs-human-test --color 5319E7 --description "Implemented; awaiting human verification" 2>/dev/null
+    gh issue edit <epic> --add-label needs-human-test
+    gh issue comment <epic> --body "Epik gotowy do odbioru: wszystkie sub-issues zamknięte. Scenariusz w sekcji ## Jak odebrać."
+    ```
+    Otherwise leave the epic's labels alone.
+- **Gate not green or work unfinished** — same as the "Not complete" path above: leave the
+  sub-issue open without `needs-human-test` and comment on it with progress.
 
 # FINAL RULES
 

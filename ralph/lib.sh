@@ -175,7 +175,9 @@ ralph_model_for_complexity() {
 
   case "$runtime:$complexity" in
     claude:heavy)   RALPH_MODEL="opus"; RALPH_EFFORT="high" ;;
-    claude:trivial) RALPH_MODEL="haiku"; RALPH_EFFORT="medium" ;;
+    # Not Haiku: the worker needs auto mode, which Claude Code does not offer on Haiku; without
+    # it every Bash call waits for approval and the AFK loop stalls.
+    claude:trivial) RALPH_MODEL="sonnet"; RALPH_EFFORT="low" ;;
     claude:*)       RALPH_MODEL="sonnet"; RALPH_EFFORT="medium" ;;
 
     codex:heavy)   RALPH_MODEL="${RALPH_CODEX_MODEL_HEAVY:-${RALPH_CODEX_MODEL:-}}"; RALPH_EFFORT="${RALPH_CODEX_EFFORT_HEAVY:-high}" ;;
@@ -363,4 +365,123 @@ ralph_warn_dirty_tree() {
     echo "⚠️  Ralph zostawił niezacommitowane zmiany w drzewie roboczym."
     echo "   Sprawdź (git status) i domknij je, zanim odpalisz kolejny przebieg."
   fi
+}
+
+# --- Epics (ADR 0012). Pure JSON helpers: no gh calls, so they can be unit-tested. ---
+# "epics" JSON is an array of {number, started, open:[sub-issue numbers]}, where `started`
+# means at least one sub-issue is already closed.
+
+# stdin: issues array; $1: epics JSON. Adds `parent` (epic number or null) to every issue.
+ralph_annotate_parents() {
+  jq -c --argjson epics "$1" \
+    'map(. as $i | .parent = (first($epics[] | select(.open | index($i.number)) | .number) // null))'
+}
+
+# stdin: issues array (with `parent`); $1: epics JSON. If a started epic has candidate
+# sub-issues, keep only those of the oldest (lowest number) such epic; otherwise pass through.
+ralph_filter_started_epic() {
+  jq -c --argjson epics "$1" '
+    . as $issues
+    | ([$epics[] | select(.started) | .number as $e | select(any($issues[]; .parent == $e)) | $e] | min) as $pick
+    | if $pick == null then $issues else [$issues[] | select(.parent == $pick)] end'
+}
+
+# stdin: issues array (with `parent`); $1: epic number. Keeps only that epic's sub-issues.
+ralph_epic_issues() {
+  jq -c --argjson epic "$1" '[.[] | select(.parent == $epic)]'
+}
+
+# --- Epic branch (ADR 0012). Opt-in per repo with one line in the "## Ralph" section. ---
+# Syntax (fixed English key whatever the section's language, so bash reads it reliably), alone on
+# its own line; a leading list marker and backticks around the value are tolerated:
+#     ralph-base-branch: dev
+# stdin: the "## Ralph" section. Line absent -> no output, rc 0 (trunk: the loop never switches
+# branches). Valid line -> the base branch on stdout, rc 0. Any other line mentioning the key
+# (bad syntax, bad branch name, a second declaration) -> message on stderr, rc 1: fail closed
+# rather than silently fall back to trunk.
+ralph_base_branch() {
+  local lines count line value
+  lines=$(grep -F 'ralph-base-branch' || true)
+  [ -n "$lines" ] || return 0
+  count=$(printf '%s\n' "$lines" | wc -l | tr -d ' ')
+  if [ "$count" != 1 ]; then
+    echo "Sekcja ## Ralph deklaruje ralph-base-branch więcej niż raz — zostaw jedną linię." >&2
+    return 1
+  fi
+  line="$lines"
+  if [[ "$line" =~ ^[[:space:]]*([-*][[:space:]]+)?ralph-base-branch:[[:space:]]*\`?([A-Za-z0-9_][A-Za-z0-9._/-]*)\`?[[:space:]]*$ ]] &&
+    value="${BASH_REMATCH[2]}" && [[ "$value" != *..* && "$value" != */ && "$value" != *.lock ]]; then
+    printf '%s\n' "$value"
+    return 0
+  fi
+  echo "Zła składnia linii gałęzi bazowej w ## Ralph: '$line'." >&2
+  echo "Oczekiwano dokładnie: ralph-base-branch: <gałąź> (np. ralph-base-branch: dev)." >&2
+  return 1
+}
+
+# Parent (epic) number of issue $1 via gh; no output when it has none (GitHub answers 404).
+# rc 1 when GitHub could not answer at all — callers must not mistake that for "no parent".
+ralph_issue_parent() {
+  local out
+  if out=$(gh api "repos/{owner}/{repo}/issues/$1/parent" --jq .number 2>/dev/null); then
+    printf '%s\n' "$out"
+    return 0
+  fi
+  grep -q '"status":"404"' <<<"$out"
+}
+
+# With an epic branch configured, uncommitted work (tracked changes or untracked files) would
+# travel across a checkout or block a merge: refuse, with a message, rc 1.
+ralph_require_clean_tree() {
+  if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+    echo "Drzewo robocze nie jest czyste — nie przełączam gałęzi i nie uruchamiam workera." >&2
+    echo "Domknij albo odłóż zmiany (git status), potem odpal ponownie." >&2
+    return 1
+  fi
+}
+
+# Put the repo in cwd on the branch the worker should commit to. $1: base branch (from
+# ralph_base_branch); $2: epic number, empty for an issue without a parent.
+#   - dirty tree (tracked changes or untracked files) -> refuse before touching git;
+#   - no epic -> switch to the base;
+#   - epic -> switch to epik/<n>, creating it from the base on first use; if the base has moved
+#     on, merge it in. A conflicting merge is aborted, leaving a clean tree on epik/<n>.
+# Local only: no fetch, no push. rc 0 = ready for the worker; rc 1 = stop (message on stderr).
+ralph_prepare_branch() {
+  local base="$1" epic="${2:-}" branch
+
+  ralph_require_clean_tree || return 1
+  if ! git rev-parse --verify --quiet "refs/heads/$base" >/dev/null; then
+    echo "Nie ma lokalnej gałęzi bazowej '$base' (ralph-base-branch w ## Ralph)." >&2
+    echo "Utwórz ją albo popraw linię; pętla nie pobiera gałęzi z remote." >&2
+    return 1
+  fi
+
+  if [ -z "$epic" ]; then
+    git checkout -q "$base" || return 1
+    echo "Issue bez epiku — pracuję na gałęzi bazowej $base."
+    return 0
+  fi
+
+  branch="epik/$epic"
+  if ! git rev-parse --verify --quiet "refs/heads/$branch" >/dev/null; then
+    git checkout -q -b "$branch" "$base" || return 1
+    echo "Utworzyłem gałąź $branch z $base."
+    return 0
+  fi
+
+  git checkout -q "$branch" || return 1
+  if git merge-base --is-ancestor "$base" "$branch"; then
+    echo "Pracuję na gałęzi $branch (baza $base bez nowych commitów)."
+    return 0
+  fi
+  if git merge -q --no-edit "$base" >/dev/null 2>&1; then
+    echo "Scaliłem $base do $branch."
+    return 0
+  fi
+  # Abort whatever the failed merge left behind; the tree was clean before it, so this restores it.
+  git merge --abort 2>/dev/null || git reset -q --merge 2>/dev/null
+  echo "Konflikt przy scalaniu $base do $branch — merge przerwany, drzewo czyste, worker nie rusza." >&2
+  echo "Rozwiąż ręcznie: git checkout $branch && git merge $base, potem odpal ponownie." >&2
+  return 1
 }

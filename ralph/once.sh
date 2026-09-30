@@ -5,7 +5,8 @@
 #   2. its `complexity:*` label is mapped to a model, and that model implements it.
 #
 # `ralph-once <n>` runs issue <n> directly, skipping stage 1 (and the selector's token cost).
-# A PRD/epic ([PRD] prefix) is refused in that mode — only implementable slices are run.
+# `ralph-once <epic>` ([PRD] prefix) works one of that epic's open sub-issues, picked by the selector.
+# In loop mode a started epic (>=1 closed sub-issue) is finished before others are touched (ADR 0012).
 
 # Self-locate: this script + its sibling prompts/guard live together (in the shared ralph/
 # dir, reached via a symlink on PATH). `realpath` resolves that symlink so prompts are read
@@ -44,14 +45,23 @@ fi
 # exits non-zero, so `|| exit 0` stops the loop cleanly (the message is already on screen).
 "$SCRIPT_DIR/preflight.sh" "$RALPH_RUNTIME" || exit 0
 
+# Optional epic branch (ADR 0012): a `ralph-base-branch: <base>` line in ## Ralph. Absent ->
+# trunk, the loop never switches branches. When set, a dirty tree is refused here already, so
+# no selector tokens are spent on a run that could not switch branches anyway.
+base_branch=$(ralph_contract_section "$(ralph_contract_file "$RALPH_RUNTIME")" | ralph_base_branch) || exit 1
+if [ -n "$base_branch" ]; then
+  ralph_require_clean_tree || exit 1
+fi
+
 # 1. Recent history, for both the selector and the worker.
 commits=$(git log -n 5 --format="%H%n%ad%n%B---" --date=short 2>/dev/null || echo "No commits found")
 
-# 2. Decide which issue to work on: the one named on the command line, or — in loop mode —
-#    whatever the cheap selector picks from the agent-ready queue.
+# 2. Decide which issue to work on: the one named on the command line, or whatever the cheap
+#    selector picks from the agent-ready queue (narrowed to an epic, see below).
+EPIC_ARG=""
 if [ -n "$ISSUE_ARG" ]; then
-  # Explicit mode. Verify the issue exists, and refuse PRDs/epics ([PRD] prefix): those are
-  # not implementable slices, so running one would feed a whole epic to the worker.
+  # Explicit mode. Verify the issue exists. A [PRD] (epic) is not implementable itself: it
+  # switches to epic mode, where the selector chooses among that epic's open sub-issues.
   num="$ISSUE_ARG"
   title=$(gh issue view "$num" --json title --jq .title 2>/dev/null) || true
   if [ -z "$title" ]; then
@@ -59,23 +69,48 @@ if [ -n "$ISSUE_ARG" ]; then
     exit 1
   fi
   case "$title" in
-    "[PRD]"*)
-      echo "Issue #${num} to PRD/epik ([PRD]), nie implementowalny slice."
-      echo "Podaj numer child-issue ([ISSUE]) zamiast PRD."
-      exit 1
-      ;;
+    "[PRD]"*) EPIC_ARG="$num" ;;
   esac
-  echo "Tryb bezpośredni: pomijam selektor, odpalam issue #${num}; ustalam etykietę complexity..."
-else
-  # Loop mode. Pull open, agent-ready (AFK) issues from GitHub as the task list.
+  if [ -z "$EPIC_ARG" ]; then
+    echo "Tryb bezpośredni: pomijam selektor, odpalam issue #${num}; ustalam etykietę complexity..."
+  fi
+fi
+
+if [ -z "$ISSUE_ARG" ] || [ -n "$EPIC_ARG" ]; then
+  # Loop mode (or epic mode). Pull open, agent-ready (AFK) issues from GitHub as the task list.
   #   The `ready-for-agent` label is the AFK filter (HITL issues won't carry it).
   #   PRDs/epics also carry `ready-for-agent` but are excluded here by title prefix,
   #   so the loop only ever picks implementable tracer-bullet slices.
   echo "Pobieram otwarte zadania (ready-for-agent) z GitHuba..."
-  issues=$(gh issue list --label ready-for-agent --state open \
-    --json number,title,body \
-    --jq '.[] | select(.title | startswith("[PRD]") | not) | "## Issue #\(.number): \(.title)\n\n\(.body)\n"' \
-    2>/dev/null)
+
+  # Epic structure: one sub_issues call per open epic -> {number, started, open:[...]}.
+  epics="[]"
+  for e in $(gh issue list --state open --limit 200 --json number,title \
+      --jq '.[] | select(.title | startswith("[PRD]")) | .number' 2>/dev/null); do
+    subs=$(gh api --paginate "repos/{owner}/{repo}/issues/${e}/sub_issues" 2>/dev/null | jq -s -c 'add // []')
+    [ -n "$subs" ] || subs="[]"
+    epics=$(jq -c --argjson e "$e" --argjson subs "$subs" \
+      '. + [{number: $e, started: any($subs[]; .state == "closed"), open: [$subs[] | select(.state == "open") | .number]}]' \
+      <<<"$epics")
+  done
+
+  if [ -n "$EPIC_ARG" ]; then
+    open_count=$(jq -r --argjson e "$EPIC_ARG" '[.[] | select(.number == $e) | .open[]] | length' <<<"$epics")
+    if [ "${open_count:-0}" = 0 ]; then
+      echo "Epik #${EPIC_ARG} nie ma otwartych sub-issues — czeka na odbiór albo jest skończony. Nie uruchamiam workera."
+      exit 0
+    fi
+  fi
+
+  issues_json=$(gh issue list --label ready-for-agent --state open --limit 200 \
+    --json number,title,body 2>/dev/null | jq -c 'map(select(.title | startswith("[PRD]") | not))')
+  issues_json=$(ralph_annotate_parents "$epics" <<<"${issues_json:-[]}")
+  if [ -n "$EPIC_ARG" ]; then
+    issues_json=$(ralph_epic_issues "$EPIC_ARG" <<<"$issues_json")
+  else
+    issues_json=$(ralph_filter_started_epic "$epics" <<<"$issues_json")
+  fi
+  issues=$(jq -r '.[] | "## Issue #\(.number): \(.title)\n\n\(.body)\n"' <<<"$issues_json")
 
   if [ -z "$issues" ]; then
     echo "Brak otwartych zadań (ready-for-agent). Nie ma nic do zrobienia."
@@ -115,7 +150,24 @@ effort="$RALPH_EFFORT"
 
 echo "Wybrane issue #${num} (complexity:${complexity}) -> $(ralph_model_display "$RALPH_RUNTIME" "$model" "$effort")"
 
-# 4. Stage 2 — implement ONLY the selected issue, on the chosen model.
+# 4. Epic branch: put the repo on epik/<parent> (merging the base in) or on the base for an
+#    issue without a parent. The run ends on that branch, ready for local acceptance.
+if [ -n "$base_branch" ]; then
+  # Loop/epic mode already knows the parent from the annotated list; explicit mode (or a
+  # selector answer outside that list) asks GitHub. A failed lookup stops the run rather than
+  # silently putting sub-issue work on the base.
+  if jq -e --argjson n "$num" 'any(.[]; .number == $n)' <<<"${issues_json:-[]}" >/dev/null 2>&1; then
+    parent=$(jq -r --argjson n "$num" 'first(.[] | select(.number == $n) | .parent) // empty' <<<"$issues_json")
+  elif ! parent=$(ralph_issue_parent "$num"); then
+    echo "Nie udało się ustalić epiku issue #${num} (gh api); nie przełączam gałęzi, nie uruchamiam workera."
+    exit 1
+  fi
+  ralph_prepare_branch "$base_branch" "$parent" || exit 1
+  # The worker should see the history of the branch it will commit to.
+  commits=$(git log -n 5 --format="%H%n%ad%n%B---" --date=short 2>/dev/null || echo "No commits found")
+fi
+
+# 5. Stage 2 — implement ONLY the selected issue, on the chosen model.
 issue=$(gh issue view "$num" --json number,title,body \
   --jq '"## Issue #\(.number): \(.title)\n\n\(.body)\n"' 2>/dev/null)
 prompt=$(ralph_render_prompt "$RALPH_RUNTIME" "$SCRIPT_DIR/prompt.md")

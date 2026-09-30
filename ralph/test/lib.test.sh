@@ -131,6 +131,9 @@ done
 ralph_model_for_complexity claude heavy
 expect_eq "Claude heavy model" "$RALPH_MODEL/$RALPH_EFFORT" "opus/high"
 
+ralph_model_for_complexity claude trivial
+expect_eq "Claude trivial stays on a model with auto mode (not Haiku)" "$RALPH_MODEL/$RALPH_EFFORT" "sonnet/low"
+
 ralph_model_for_complexity codex trivial
 expect_eq "Codex trivial uses config model + low reasoning" "$RALPH_MODEL/$RALPH_EFFORT" "/low"
 
@@ -228,6 +231,188 @@ else
   echo "✗ stale lock cleanup is explicit in non-interactive mode"
   fail=$((fail+1))
 fi
+
+# --- Epic filter (pure JSON) ---
+iss() { jq -c -n "$1"; }
+nums() { jq -r 'map(.number) | join(",")'; }
+E_NONE='[]'
+I_FLAT='[{"number":1,"parent":null},{"number":2,"parent":null}]'
+expect_eq "filter: no epics -> unchanged" "$(ralph_filter_started_epic "$E_NONE" <<<"$I_FLAT" | nums)" "1,2"
+E_ONE='[{"number":10,"started":true,"open":[11,12]},{"number":20,"started":false,"open":[21]}]'
+I_ONE='[{"number":11,"parent":10},{"number":12,"parent":10},{"number":21,"parent":20},{"number":5,"parent":null}]'
+expect_eq "filter: one started epic -> only its sub-issues" "$(ralph_filter_started_epic "$E_ONE" <<<"$I_ONE" | nums)" "11,12"
+E_TWO='[{"number":30,"started":true,"open":[31]},{"number":10,"started":true,"open":[11]}]'
+I_TWO='[{"number":31,"parent":30},{"number":11,"parent":10},{"number":5,"parent":null}]'
+expect_eq "filter: two started epics -> oldest" "$(ralph_filter_started_epic "$E_TWO" <<<"$I_TWO" | nums)" "11"
+E_EMPTY='[{"number":10,"started":true,"open":[]},{"number":20,"started":false,"open":[21]}]'
+I_EMPTY='[{"number":21,"parent":20},{"number":5,"parent":null}]'
+expect_eq "filter: started epic without open sub-issues is ignored" "$(ralph_filter_started_epic "$E_EMPTY" <<<"$I_EMPTY" | nums)" "21,5"
+E_MIX='[{"number":20,"started":false,"open":[21]}]'
+expect_eq "filter: parentless issues next to unstarted epics unchanged" "$(ralph_filter_started_epic "$E_MIX" <<<"$I_EMPTY" | nums)" "21,5"
+expect_eq "annotate: parent filled from epics' open lists" \
+  "$(ralph_annotate_parents "$E_ONE" <<<'[{"number":11},{"number":5}]' | jq -c 'map(.parent)')" "[10,null]"
+expect_eq "epic issues: only the named epic's sub-issues" "$(ralph_epic_issues 20 <<<"$I_ONE" | nums)" "21"
+expect_eq "epic issues: epic without open sub-issues -> empty" "$(ralph_epic_issues 99 <<<"$I_ONE" | nums)" ""
+
+# --- Epic branch (ADR 0012) ---
+SECTION_WITH=$'## Ralph\n\n### Commit\n\nralph-base-branch: dev\n\n- Polish message.'
+expect_eq "base branch: line present -> branch name" "$(ralph_base_branch <<<"$SECTION_WITH")" "dev"
+SECTION_WITHOUT=$'## Ralph\n\n### Commit\n\n- Polish message.'
+expect_eq "base branch: line absent -> nothing (trunk)" "$(ralph_base_branch <<<"$SECTION_WITHOUT")" ""
+expect_ok "base branch: line absent -> success" ralph_base_branch <<<"$SECTION_WITHOUT"
+expect_eq "base branch: list marker and backticks tolerated" \
+  "$(ralph_base_branch <<<$'## Ralph\n- ralph-base-branch: `release/2.x`')" "release/2.x"
+expect_fail "base branch: empty value rejected" ralph_base_branch <<<$'ralph-base-branch:' 2>/dev/null
+expect_fail "base branch: extra words rejected" ralph_base_branch <<<$'ralph-base-branch: dev (produkcja)' 2>/dev/null
+expect_fail "base branch: bad ref name rejected" ralph_base_branch <<<$'ralph-base-branch: ../dev' 2>/dev/null
+expect_fail "base branch: key inside prose rejected" ralph_base_branch <<<$'Use `ralph-base-branch: dev` here.' 2>/dev/null
+expect_fail "base branch: two declarations rejected" ralph_base_branch <<<$'ralph-base-branch: dev\nralph-base-branch: main' 2>/dev/null
+expect_ok "base branch: bad syntax explains the expected line" \
+  grep -qF 'ralph-base-branch: <gałąź>' <<<"$(ralph_base_branch <<<'ralph-base-branch:' 2>&1)"
+
+# The ralph-konfiguracja template is what writes that line into other repos: it must name the key
+# exactly once (any other mention makes the parser fail closed), and the line must parse.
+TEMPLATE=$(awk '/^```markdown$/{f=1;next} /^```$/{f=0} f' "$SCRIPT_DIR/../../skills/ralph-konfiguracja/SKILL.md")
+expect_eq "template: key named exactly once" "$(grep -cF 'ralph-base-branch' <<<"$TEMPLATE")" "1"
+expect_eq "template: base-branch line parses once <baza> is filled" \
+  "$(sed 's/<baza>/dev/' <<<"$TEMPLATE" | ralph_base_branch)" "dev"
+expect_eq "template: without the epic-branch line the section stays trunk" \
+  "$(grep -vF 'ralph-base-branch' <<<"$TEMPLATE" | ralph_base_branch)" ""
+
+# ralph_prepare_branch works on the git repo in cwd: each case gets a fresh temp repo whose
+# base branch `dev` holds one commit, and runs in a subshell (exit 0 = pass).
+branch_case() {
+  local desc="$1" fn="$2" repo rc
+  repo=$(mktemp -d)
+  (
+    cd "$repo" || exit 1
+    git init -q -b dev
+    git config user.name ralph-test
+    git config user.email ralph-test@example.invalid
+    printf 'a\n' > f
+    git add f
+    git commit -qm init
+    "$fn"
+  ) >/dev/null 2>"$repo.err"
+  rc=$?
+  if [ "$rc" = 0 ]; then
+    echo "✓ $desc"
+    pass=$((pass+1))
+  else
+    echo "✗ $desc"
+    sed 's/^/   /' "$repo.err"
+    fail=$((fail+1))
+  fi
+  rm -rf "$repo" "$repo.err"
+}
+on_branch() { [ "$(git branch --show-current)" = "$1" ]; }
+commit_file() { printf '%s\n' "$2" > "$1"; git add "$1"; git commit -qm "$1: $2"; }
+
+case_create() {
+  ralph_prepare_branch dev 7 || exit 1
+  on_branch epik/7 || exit 1
+  [ "$(git rev-parse epik/7)" = "$(git rev-parse dev)" ]
+}
+branch_case "prepare: first run on an epic creates epik/<n> from base" case_create
+
+case_reuse() {
+  git checkout -q -b epik/7
+  commit_file g epic-work
+  local epic_head; epic_head=$(git rev-parse HEAD)
+  git checkout -q dev
+  ralph_prepare_branch dev 7 || exit 1
+  on_branch epik/7 || exit 1
+  # Base did not move: no merge, the epic's own history is untouched.
+  [ "$(git rev-parse HEAD)" = "$epic_head" ]
+}
+branch_case "prepare: later runs switch to the existing epik/<n>" case_reuse
+
+case_merge_base() {
+  git checkout -q -b epik/7
+  commit_file g epic-work
+  git checkout -q dev
+  commit_file h hotfix
+  ralph_prepare_branch dev 7 || exit 1
+  on_branch epik/7 || exit 1
+  git merge-base --is-ancestor dev epik/7 || exit 1
+  [ -f g ] && [ -f h ] || exit 1
+  [ -z "$(git status --porcelain)" ]
+}
+branch_case "prepare: base moved on -> merged into epik/<n>" case_merge_base
+
+case_conflict() {
+  git checkout -q -b epik/7
+  commit_file f epic-side
+  local epic_head; epic_head=$(git rev-parse HEAD)
+  git checkout -q dev
+  commit_file f base-side
+  local out
+  if out=$(ralph_prepare_branch dev 7 2>&1); then exit 1; fi
+  grep -q 'Konflikt' <<<"$out" || exit 1
+  [ -z "$(git status --porcelain)" ] || exit 1
+  [ ! -e "$(git rev-parse --git-path MERGE_HEAD)" ] || exit 1
+  [ "$(git rev-parse epik/7)" = "$epic_head" ] || exit 1
+  [ "$(cat f)" = "epic-side" ]
+}
+branch_case "prepare: merge conflict -> aborted, clean tree, non-zero, epic untouched" case_conflict
+
+case_dirty_tracked() {
+  printf 'edit\n' > f
+  local head; head=$(git rev-parse HEAD)
+  if ralph_prepare_branch dev 7 2>/dev/null; then exit 1; fi
+  on_branch dev || exit 1
+  ! git rev-parse --verify --quiet refs/heads/epik/7 >/dev/null || exit 1
+  [ "$(cat f)" = "edit" ] && [ "$(git rev-parse HEAD)" = "$head" ]
+}
+branch_case "prepare: modified tracked file -> refused before any git operation" case_dirty_tracked
+
+case_dirty_untracked() {
+  git checkout -q -b epik/7
+  git checkout -q dev
+  commit_file h hotfix
+  printf 'x\n' > stray
+  if ralph_prepare_branch dev 7 2>/dev/null; then exit 1; fi
+  # Still on dev, epik/7 not merged, the stray file left alone.
+  on_branch dev || exit 1
+  ! git merge-base --is-ancestor dev epik/7 || exit 1
+  [ -f stray ]
+}
+branch_case "prepare: untracked file -> refused, nothing switched or merged" case_dirty_untracked
+
+case_no_parent() {
+  git checkout -q -b epik/7
+  commit_file g epic-work
+  ralph_prepare_branch dev "" || exit 1
+  on_branch dev || exit 1
+  [ ! -f g ]
+}
+branch_case "prepare: issue without a parent -> work on the base" case_no_parent
+
+case_missing_base() {
+  local out
+  if out=$(ralph_prepare_branch nope 7 2>&1); then exit 1; fi
+  grep -q "nope" <<<"$out" || exit 1
+  on_branch dev || exit 1
+  ! git rev-parse --verify --quiet refs/heads/epik/7 >/dev/null
+}
+branch_case "prepare: missing local base -> refused, no epic branch created" case_missing_base
+
+fake_gh_dir=$(mktemp -d)
+cat > "$fake_gh_dir/gh" <<'FAKE_GH'
+#!/usr/bin/env bash
+case "$FAKE_GH_MODE" in
+  parent) echo 12 ;;
+  none) echo '{"message":"No parent issue found","status":"404"}'; echo 'gh: No parent issue found (HTTP 404)' >&2; exit 1 ;;
+  *) echo 'error connecting to api.github.com' >&2; exit 1 ;;
+esac
+FAKE_GH
+chmod +x "$fake_gh_dir/gh"
+expect_eq "issue parent: sub-issue -> epic number" "$(PATH="$fake_gh_dir:$PATH" FAKE_GH_MODE=parent ralph_issue_parent 13)" "12"
+expect_eq "issue parent: 404 -> nothing" "$(PATH="$fake_gh_dir:$PATH" FAKE_GH_MODE=none ralph_issue_parent 13)" ""
+expect_ok "issue parent: 404 -> success" env PATH="$fake_gh_dir:$PATH" FAKE_GH_MODE=none bash -c ". '$SCRIPT_DIR/../lib.sh'; ralph_issue_parent 13"
+expect_fail "issue parent: other gh failure -> error, not 'no parent'" \
+  env PATH="$fake_gh_dir:$PATH" FAKE_GH_MODE=down bash -c ". '$SCRIPT_DIR/../lib.sh'; ralph_issue_parent 13"
+rm -rf "$fake_gh_dir"
 
 echo
 echo "Wynik: $pass OK, $fail FAIL"
