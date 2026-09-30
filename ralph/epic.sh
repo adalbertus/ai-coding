@@ -83,7 +83,7 @@ while :; do
 "Sesja HITL dla issue #${issue:-?} (epic #${epic}) skończyła się bez rozwiązania. Rozstrzygnij je (domknij albo przywróć ready-for-agent) i uruchom ralph-epic ponownie." ;;
     stop-nothing)
       finish "$RALPH_EXIT_NOTHING" "Ralph: nic do zrobienia" \
-"Epic #${epic} ma otwarte sub-issues, ale żadnego do zrobienia teraz — HITL bez decyzji albo zablokowane:
+"Epic #${epic} ma otwarte sub-issues, ale żadne nie jest wolne — każde ma otwarty bloker w „Blocked by”:
 $(open_list)" ;;
     stop-error)
       finish "$RALPH_EXIT_ERROR" "Ralph: błąd" \

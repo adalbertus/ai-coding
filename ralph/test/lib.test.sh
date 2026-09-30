@@ -212,7 +212,7 @@ STREAM
 )
 expect_eq "renderer: Bash call, Edit/Write paths, final result; unknown/garbage skipped" \
   "$(ralph_render_stream <<<"$stream_fixture")" \
-  $'▸ Bash: bash test.sh\n▸ Edit: greet.sh\n▸ Write: /elsewhere/x.md\n\nGotowe: issue zamknięte.'
+  $'▸ Bash: bash test.sh\n▸ Edit: greet.sh\n▸ Write: /elsewhere/x.md\n\n── Raport workera ──\nGotowe: issue zamknięte.'
 expect_eq "renderer: unknown-only stream renders nothing" \
   "$(ralph_render_stream <<<'{"type":"system","subtype":"init"}')" ""
 
@@ -268,7 +268,7 @@ STREAM
 )
 expect_eq "codex renderer: command, failed command, file changes, final message; unknown/garbage skipped" \
   "$(ralph_render_codex_stream <<<"$codex_fixture")" \
-  $'▸ Bash: bash test.sh\n▸ Bash: false ✗ exit 1\n▸ Edit: greet.sh\n▸ Write: /elsewhere/x.md\n\nGotowe: issue zamknięte.'
+  $'▸ Bash: bash test.sh\n▸ Bash: false ✗ exit 1\n▸ Edit: greet.sh\n▸ Write: /elsewhere/x.md\n\n── Raport workera ──\nGotowe: issue zamknięte.'
 expect_eq "codex renderer: unknown-only stream renders nothing" \
   "$(ralph_render_codex_stream <<<'{"type":"thread.started","thread_id":"t"}')" ""
 
@@ -400,6 +400,9 @@ BLK_H=$'## Blocked by\n\n- #9'
 S_BLK="[{\"number\":1,\"labels\":$L_HITL,\"body\":\"$(printf '%s' "$BLK_H" | jq -Rs . | sed 's/^"//;s/"$//')\"}]"
 expect_eq "stage: blocked HITL dropped by filter -> nothing" \
   "$(ralph_filter_unblocked '[9]' <<<"$S_BLK" | ralph_epic_stage | nums)" ""
+expect_eq "pick first: lowest number, whatever the order" \
+  "$(ralph_pick_first <<<'[{"number":9},{"number":7},{"number":8}]')" "7"
+expect_eq "pick first: empty list -> nothing" "$(ralph_pick_first <<<'[]')" ""
 expect_eq "stage: blocked AFK, free HITL -> HITL" \
   "$(jq -c '[.[0] + {labels: [{"name":"ready-for-agent"}]}] + [{"number":7,"labels":[],"body":""}]' <<<"$S_BLK" \
     | ralph_filter_unblocked '[9]' | ralph_epic_stage | nums)" "7"

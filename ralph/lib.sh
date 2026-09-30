@@ -237,7 +237,7 @@ ralph_render_stream() {
             | tostring | split("\n")[0] | ltrimstr($cwd)) as $d
           | "▸ \(.name)" + (if $d == "" then "" else ": \($d)" end))
       elif .type == "result" and (.result | type) == "string" and .result != "" then
-        "\n" + .result
+        "\n── Raport workera ──\n" + .result
       else empty end'
 }
 
@@ -299,7 +299,7 @@ ralph_render_codex_stream() {
               .out = "▸ WebSearch: \(($i.query // "") | first_line)"
             else . end
         elif $e.type == "turn.completed" and .last != null then
-          .out = "\n" + .last | .last = null
+          .out = "\n── Raport workera ──\n" + .last | .last = null
         else . end;
       .out | select(. != null and . != ""))'
 }
@@ -542,6 +542,14 @@ ralph_epic_stage() {
     def afk: any(.labels[]?; .name == "ready-for-agent");
     ([.[] | select(afk)]) as $a
     | if ($a | length) > 0 then $a else [.[] | select(afk | not)] end'
+}
+
+# Pure. stdin: candidate issues (already unblocked and staged). Prints the lowest issue number,
+# or nothing. Used instead of the model selector inside an epic (sub-issues are published in
+# dependency order, so the lowest free number is the next planned slice) and whenever there is a
+# single candidate (ADR 0013, update).
+ralph_pick_first() {
+  jq -r '[.[].number] | min // empty'
 }
 
 # Exit codes of once.sh (documented in its header).

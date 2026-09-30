@@ -6,10 +6,11 @@
 #
 # `ralph-once <n>` runs issue <n> directly, skipping stage 1 (and the selector's token cost).
 # An issue without `ready-for-agent` (HITL) opens an interactive session; without a number only AFK is taken.
-# `ralph-once <epic>` ([PRD] prefix) works one of that epic's open sub-issues, picked by the selector.
+# `ralph-once <epic>` ([PRD] prefix) works one of that epic's open sub-issues: the lowest-numbered free one.
 # In loop mode a started epic (>=1 closed sub-issue) is finished before others are touched (ADR 0012).
-# Inside an epic, free AFK sub-issues go first; only when none is left does the same selector pick a
-# free HITL one (no `ready-for-agent`) and a HITL session opens (ADR 0013).
+# Inside an epic, free AFK sub-issues go first; only when none is left is a free HITL one (no
+# `ready-for-agent`) taken and a HITL session opens (ADR 0013). The model selector runs only outside
+# an epic, and only with more than one candidate: blockers and order are the script's job.
 #
 # Exit codes (the run's result, for callers such as ralph-epic):
 #   0  issue closed
@@ -146,21 +147,31 @@ if [ -z "$ISSUE_ARG" ] || [ -n "$EPIC_ARG" ]; then
     exit "$RALPH_EXIT_NOTHING"
   fi
 
-  # Stage 1 — cheap selector. Picks ONE issue number (or NO_TASK). Tool-free, so it
-  #   reasons over the issue bodies provided above; runs through the selected runtime's
-  #   cheap/read-only adapter.
-  select_prompt=$(cat "$SCRIPT_DIR/select.md")
-  echo "Selektor ($(ralph_selector_model_label "$RALPH_RUNTIME")) wybiera następne zadanie... (chwilę trwa)"
-  selection=$(ralph_run_model_capture "$RALPH_RUNTIME" selector \
-    "Previous commits: $commits Issues: $issues $select_prompt" 2>/dev/null)
-  num=$(printf '%s' "$selection" | grep -Eo 'NO_TASK|[0-9]+' | head -1)
+  if [ -n "$EPIC_ARG" ]; then
+    # Inside an epic the order is deterministic: a model adds nothing the numbering does not,
+    # and a spurious NO_TASK would stop an unattended ralph-epic.
+    num=$(ralph_pick_first <<<"$issues_json")
+    echo "Epic #${EPIC_ARG}: biorę pierwsze wolne sub-issue #${num} (bez selektora); ustalam etykietę complexity..."
+  elif [ "$(jq -r 'length' <<<"$issues_json")" = 1 ]; then
+    num=$(ralph_pick_first <<<"$issues_json")
+    echo "Jedyne wolne issue: #${num} (bez selektora); ustalam etykietę complexity..."
+  else
+    # Stage 1 — cheap selector. Picks ONE issue number (or NO_TASK) among free issues. Tool-free,
+    #   so it reasons over the issue bodies provided above; runs through the selected runtime's
+    #   cheap/read-only adapter.
+    select_prompt=$(cat "$SCRIPT_DIR/select.md")
+    echo "Selektor ($(ralph_selector_model_label "$RALPH_RUNTIME")) wybiera następne zadanie... (chwilę trwa)"
+    selection=$(ralph_run_model_capture "$RALPH_RUNTIME" selector \
+      "Previous commits: $commits Issues: $issues $select_prompt" 2>/dev/null)
+    num=$(printf '%s' "$selection" | grep -Eo 'NO_TASK|[0-9]+' | head -1)
 
-  if [ -z "$num" ] || [ "$num" = "NO_TASK" ]; then
-    echo "Selektor nie wskazał żadnego zadania (odpowiedź: '${selection}'). Nie ma nic do zrobienia."
-    exit "$RALPH_EXIT_NOTHING"
+    if [ -z "$num" ] || [ "$num" = "NO_TASK" ]; then
+      echo "Selektor nie wskazał żadnego zadania (odpowiedź: '${selection}'). Nie ma nic do zrobienia."
+      exit "$RALPH_EXIT_NOTHING"
+    fi
+
+    echo "Selektor wybrał issue #${num}; ustalam etykietę complexity..."
   fi
-
-  echo "Selektor wybrał issue #${num}; ustalam etykietę complexity..."
 fi
 
 # 3. Map the selected issue's complexity label to a model AND a reasoning-effort level.

@@ -164,7 +164,7 @@ Pętla bierze **jedno** zadanie, implementuje je, uruchamia feedback loops i com
 ralph-once 224          # domyślnie Claude, wstecznie kompatybilne
 ralph-once claude 224   # jawnie Claude
 ralph-once codex 224    # jawnie Codex
-ralph-once 12           # 12 to epic ([PRD]) → selektor wybiera jedno z jego otwartych sub-issues
+ralph-once 12           # 12 to epic ([PRD]) → pierwsze wolne z jego otwartych sub-issues
 ralph-once              # selektor + worker przez Claude
 ralph-once codex        # selektor + worker przez Codex
 ralph-once-local codex  # lokalne issues/*.md przez Codex
@@ -281,10 +281,11 @@ pracuje nad sub-issue wskazanego epicu; epic bez otwartych sub-issues daje komun
 workera. Tak przeskakuje się na pilny epic.
 
 **Kolejność w epicu: AFK, potem HITL** (ADR 0013). `ralph-once <nr epicu>` najpierw bierze
-niezablokowane sub-issues z `ready-for-agent` (selektor dostaje tylko je). Dopiero gdy żadnego nie
-ma, ten sam selektor wybiera jedno niezablokowane otwarte sub-issue bez tej etykiety i otwiera dla
-niego sesję HITL. Zablokowane HITL nie są brane; gdy nic nie zostaje — wyjście bez workera. Wybór
-to czysta funkcja `ralph_epic_stage` w `lib.sh`, po filtrze blokerów.
+niezablokowane sub-issues z `ready-for-agent`. Dopiero gdy żadnego nie ma, bierze niezablokowane
+otwarte sub-issue bez tej etykiety i otwiera dla niego sesję HITL. Zablokowane HITL nie są brane;
+gdy nic nie zostaje — wyjście bez workera. Z wolnych bierze to o najniższym numerze, bez selektora:
+sub-issues powstają w kolejności planu, a fałszywe `NO_TASK` modelu zatrzymywało `ralph-epic`.
+Wybór to czyste funkcje `ralph_epic_stage` i `ralph_pick_first` w `lib.sh`, po filtrze blokerów.
 
 **Kody wyjścia `ralph-once`** (kontrakt w nagłówku `ralph/once.sh`; kod wynika ze stanu issue po
 runie, nie z wyniku procesu workera):
@@ -333,7 +334,8 @@ końca. Kod: `ralph/epic.sh`; testy: `ralph/test/epic.test.sh` (atrapa `once.sh`
 „Blocked by” każdego kandydata numery issues (`#12` i `12`) i odrzuca kandydata, jeśli którykolwiek
 bloker jest otwarty (czysta funkcja `ralph_filter_unblocked`). Selektor dostaje tylko wolne issues
 i decyduje wyłącznie o kolejności; gdy po filtrze nic nie zostaje, pętla mówi, że wszystkie
-kandydaty są zablokowane, i nie wywołuje selektora.
+kandydaty są zablokowane, i nie wywołuje selektora. Selektora nie ma też przy jednym wolnym
+kandydacie ani w trybie epicu (tam decyduje numer).
 
 **Gałąź per epic** (opcjonalnie, gdy `## Ralph` ma `ralph-base-branch: <baza>`): `ralph-once` przed
 workerem odmawia przy brudnym drzewie, a potem dla sub-issue przełącza się na `epic/<nr epicu>`

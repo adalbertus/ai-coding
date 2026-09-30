@@ -65,3 +65,11 @@ w trybie epicu (jedno sub-issue na run, świeży kontekst i model z `complexity`
   i HITL tam nie ma, jak w ADR 0012.
 - Do sprawdzenia przy implementacji: czy `codex exec` potrafi automatycznie zatwierdzać wyjścia
   poza sandbox tak jak interaktywne `--approve-for-me`.
+
+## Aktualizacja (2026-09-30, odbiór)
+
+W epicu kolejność też rozstrzyga skrypt, nie selektor: z wolnych sub-issues (po filtrze blokerów
+i zasadzie „najpierw AFK”) brane jest to o najniższym numerze. Poza epikiem selektor zostaje, ale
+nie jest wołany przy jednym kandydacie. Powód: przy odbiorze Haiku zwrócił `NO_TASK`, mając do
+wyboru jedno wolne issue — w `ralph-epic` puszczonym bez nadzoru to stop całej pętli, a numeracja
+sub-issues i tak odzwierciedla kolejność planu.
