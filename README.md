@@ -210,6 +210,12 @@ Prompty są stack-agnostyczne — całą specyfikę repo delegują do sekcji `##
   (np. `ralph-base-branch: dev`), osobno w swojej linii. Brak linii = trunk. Zła składnia zatrzymuje
   pętlę z komunikatem.
 
+Sekcja zawiera też done-criteria pod epiki (sub-issue zamyka gate, resztę sprawdza odbiór epiku),
+zamknięcie epiku („zamykaj" / „potwierdzam": doc-sync, merge gałęzi epiku do bazy, usunięcie gałęzi,
+zamknięcie) i ścieżkę uwag z odbioru (drobiazg od razu w sesji, rzecz większa jako sub-issue
+`[ISSUE] Poprawka: …`). Linię gałęzi per epik skill wpisuje tylko dla repo z osobną gałęzią
+produkcyjną (np. `main` = produkcja, `dev` = praca).
+
 Sekcję pisze `/ralph-konfiguracja` — nie pisz jej ręcznie.
 
 ### Przepływ

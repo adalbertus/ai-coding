@@ -267,6 +267,15 @@ expect_fail "base branch: two declarations rejected" ralph_base_branch <<<$'ralp
 expect_ok "base branch: bad syntax explains the expected line" \
   grep -qF 'ralph-base-branch: <gałąź>' <<<"$(ralph_base_branch <<<'ralph-base-branch:' 2>&1)"
 
+# The ralph-konfiguracja template is what writes that line into other repos: it must name the key
+# exactly once (any other mention makes the parser fail closed), and the line must parse.
+TEMPLATE=$(awk '/^```markdown$/{f=1;next} /^```$/{f=0} f' "$SCRIPT_DIR/../../skills/ralph-konfiguracja/SKILL.md")
+expect_eq "template: key named exactly once" "$(grep -cF 'ralph-base-branch' <<<"$TEMPLATE")" "1"
+expect_eq "template: base-branch line parses once <baza> is filled" \
+  "$(sed 's/<baza>/dev/' <<<"$TEMPLATE" | ralph_base_branch)" "dev"
+expect_eq "template: without the epic-branch line the section stays trunk" \
+  "$(grep -vF 'ralph-base-branch' <<<"$TEMPLATE" | ralph_base_branch)" ""
+
 # ralph_prepare_branch works on the git repo in cwd: each case gets a fresh temp repo whose
 # base branch `dev` holds one commit, and runs in a subshell (exit 0 = pass).
 branch_case() {
