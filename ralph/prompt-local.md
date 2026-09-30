@@ -78,6 +78,10 @@ language, committing to `main` vs a branch/PR, where to put the detail). If `## 
 nothing about commits, default to a message that records: (1) key decisions made, (2) files
 changed, (3) blockers or notes for the next iteration.
 
+If you change the `## Ralph` section itself, make the identical change in both `CLAUDE.md` and
+`AGENTS.md` (whichever exist) in the same commit — the preflight guard halts the next run when
+the two differ.
+
 # THE ISSUE
 
 Apply the done-criteria from `## Ralph` to decide how to close out:

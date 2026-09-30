@@ -61,6 +61,9 @@ issue on the automated gate, reconcile the durable docs the `## Ralph` section l
 docs get updated in the same commit, glossary/design-class docs (CONTEXT.md, ADRs) only get a note
 in the issue thread. Commit following the `## Ralph` conventions. On an epic branch
 (`epic/<number>`), commit on the current branch and do not switch branches, merge, or push.
+If you change the `## Ralph` section itself, make the identical change in both `CLAUDE.md` and
+`AGENTS.md` (whichever exist) in the same commit — the preflight guard halts the next run when
+the two differ.
 
 # CLOSING THE ISSUE
 
