@@ -212,8 +212,8 @@ Sekcję pisze `/ralph-konfiguracja` — nie pisz jej ręcznie.
 
 1. **`/ralph-konfiguracja` / `$ralph-konfiguracja`** — raz na repo. Wykrywa stack, pisze
    `## Ralph` do `CLAUDE.md` i `AGENTS.md`, tworzy labelki pętli na GitHubie.
-2. **`/to-issues-ralph` / `$to-issues-ralph`** — z planu/PRD robi issues (vertical slices) +
-   triage `complexity:*`.
+2. **`/to-issues-ralph` / `$to-issues-ralph`** — z planu/PRD robi epik (`[PRD]` z PRD i
+   `## Jak odebrać`) oraz sub-issues (vertical slices) z triage `complexity:*`.
 3. **`ralph-once`** (albo `ralph-once-local`) w pętli z terminala — implementacja AFK.
 
 **`needs-human-test`** to bezpiecznik: gdy gate nie udowodni poprawności (np. UI na
