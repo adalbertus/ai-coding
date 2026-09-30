@@ -2,7 +2,8 @@
 
 Globalne narzędzia do pracy z agentami kodującymi w **jednym wątku na repo**:
 
-- **Skille `zapisz` i `podsumuj`** — wznawianie wątku pracy między sesjami.
+- **Skille `zapisz`, `podsumuj`, `sesja`, `sesja-konfiguracja`** — wyłączone: leżą w `skills/`,
+  ale `install.sh` ich nie linkuje (zob. [Wyłączone skille](#wyłączone-skille)).
 - **Współdzielony Ralph** — jedna autonomiczna pętla implementacyjna dla wszystkich repo,
   niezależnie od stacku. Specyfika repo (jak testować, kiedy „gotowe") siedzi w sekcji
   `## Ralph` w natywnym pliku agenta (`CLAUDE.md` / `AGENTS.md`), a nie w kopii skryptu.
@@ -27,8 +28,7 @@ cd ~/projects/ai-coding
 Instalator jest **samolokujący** (działa z dowolnego katalogu), **najpierw pyta o zgodę**
 i **idempotentny** (ponowne uruchomienie nie psuje poprawnych symlinków). Tworzy:
 
-- skille Claude → `~/.claude/skills`: `zapisz`, `podsumuj`, `sesja`, `sesja-konfiguracja`,
-  `ralph-konfiguracja`, `to-issues-ralph`
+- skille Claude → `~/.claude/skills`: `ralph-konfiguracja`, `to-issues-ralph`
 - skille Codex → `${CODEX_HOME:-~/.codex}/skills`: te same nazwy, wołane w Codexie jako `$...`
 - launchery → `~/.local/bin`: `ralph-once`, `ralph-once-local`, `ralph-epic`
 - repo-local plugin Codex → `.agents/plugins/marketplace.json` + `.agents/plugins/plugins/ai-coding`
@@ -68,6 +68,17 @@ ralph-once
 
 Ten sam globalny `ralph-once` obsłużył oba repo o różnych stackach — jedyna różnica siedzi
 w sekcji `## Ralph` każdego z nich. `install.sh` z Etapu 1 nie był tu powtarzany.
+
+## Wyłączone skille
+
+`zapisz`, `podsumuj`, `sesja` i `sesja-konfiguracja` nie są linkowane przez `install.sh` — przez
+miesiąc nie było ani jednego wywołania, a opis każdego zlinkowanego skilla trafia do kontekstu
+każdej sesji. Opisy poniżej zostają na wypadek powrotu. Włączenie ręczne (Codex analogicznie
+w `~/.codex/skills`):
+
+```bash
+ln -s ~/projects/ai-coding/skills/sesja ~/.claude/skills/sesja
+```
 
 ## Skille `zapisz` i `podsumuj`
 
@@ -372,7 +383,7 @@ na `epic/10`. Wpada pilna poprawka.
 ## Odinstalowanie
 
 ```bash
-rm ~/.claude/skills/{zapisz,podsumuj,sesja,sesja-konfiguracja,ralph-konfiguracja,to-issues-ralph}
-rm ~/.codex/skills/{zapisz,podsumuj,sesja,sesja-konfiguracja,ralph-konfiguracja,to-issues-ralph}
+rm ~/.claude/skills/{ralph-konfiguracja,to-issues-ralph}
+rm ~/.codex/skills/{ralph-konfiguracja,to-issues-ralph}
 rm ~/.local/bin/{ralph-once,ralph-once-local,ralph-epic}
 ```

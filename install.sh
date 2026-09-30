@@ -9,7 +9,8 @@ CODEX_SKILLS_DIR="$CODEX_BASE_DIR/skills"
 BIN_DIR="$HOME/.local/bin"
 PLUGIN_MARKETPLACE="$SCRIPT_DIR/.agents/plugins/marketplace.json"
 
-SKILLS=(zapisz podsumuj sesja sesja-konfiguracja ralph-konfiguracja to-issues-ralph)
+# zapisz, podsumuj, sesja, sesja-konfiguracja zostają w skills/, ale nie są linkowane (nieużywane).
+SKILLS=(ralph-konfiguracja to-issues-ralph)
 # launcher:ścieżka-względna-do-skryptu — globalny launcher symlinkuje do skryptu w repo.
 # Skrypty samolokują prompty przez realpath, więc działają z dowolnego repo (cwd).
 LAUNCHERS=("ralph-once:ralph/once.sh" "ralph-once-local:ralph/once-local.sh" "ralph-epic:ralph/epic.sh")
@@ -80,8 +81,8 @@ done
 
 echo
 echo "Gotowe (to instalujesz RAZ, globalnie — nie trzeba powtarzać per repo)."
-echo "  Skille Claude: /zapisz, /podsumuj, /sesja, /sesja-konfiguracja, /ralph-konfiguracja, /to-issues-ralph"
-echo "  Skille Codex:  \$zapisz, \$podsumuj, \$sesja, \$sesja-konfiguracja, \$ralph-konfiguracja, \$to-issues-ralph"
+echo "  Skille Claude: /ralph-konfiguracja, /to-issues-ralph"
+echo "  Skille Codex:  \$ralph-konfiguracja, \$to-issues-ralph"
 echo "  Launchery: ralph-once, ralph-once-local, ralph-epic (wymagają $BIN_DIR w PATH)"
 if [ -f "$PLUGIN_MARKETPLACE" ]; then
   echo "  Codex plugin: repo-local marketplace gotowy pod $PLUGIN_MARKETPLACE"
