@@ -110,6 +110,15 @@ if [ -z "$ISSUE_ARG" ] || [ -n "$EPIC_ARG" ]; then
   else
     issues_json=$(ralph_filter_started_epic "$epics" <<<"$issues_json")
   fi
+  # Blockers are settled here, deterministically (all open issues, not just ready-for-agent
+  # ones): the selector only ever sees free issues and decides order alone.
+  open_numbers=$(gh issue list --state open --limit 500 --json number --jq '[.[].number]' 2>/dev/null)
+  candidates=$(jq -r 'length' <<<"$issues_json")
+  issues_json=$(ralph_filter_unblocked "${open_numbers:-[]}" <<<"$issues_json")
+  if [ "$candidates" -gt 0 ] && [ "$(jq -r 'length' <<<"$issues_json")" = 0 ]; then
+    echo "Wszystkie kandydaty są zablokowane (otwarty bloker w sekcji „Blocked by”). Nie wywołuję selektora."
+    exit 0
+  fi
   issues=$(jq -r '.[] | "## Issue #\(.number): \(.title)\n\n\(.body)\n"' <<<"$issues_json")
 
   if [ -z "$issues" ]; then

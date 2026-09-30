@@ -262,6 +262,12 @@ sub-issue) z otwartymi sub-issues, selektor dostaje tylko sub-issues najstarszeg
 pracuje nad sub-issue wskazanego epicu; epic bez otwartych sub-issues daje komunikat i wyjście bez
 workera. Tak przeskakuje się na pilny epic.
 
+**Blokery rozstrzyga skrypt.** Przed selektorem (w pętli i w trybie epicu) `lib.sh` czyta z sekcji
+„Blocked by” każdego kandydata numery issues (`#12` i `12`) i odrzuca kandydata, jeśli którykolwiek
+bloker jest otwarty (czysta funkcja `ralph_filter_unblocked`). Selektor dostaje tylko wolne issues
+i decyduje wyłącznie o kolejności; gdy po filtrze nic nie zostaje, pętla mówi, że wszystkie
+kandydaty są zablokowane, i nie wywołuje selektora.
+
 **Gałąź per epic** (opcjonalnie, gdy `## Ralph` ma `ralph-base-branch: <baza>`): `ralph-once` przed
 workerem odmawia przy brudnym drzewie, a potem dla sub-issue przełącza się na `epic/<nr epicu>`
 (pierwszy raz tworzy ją z bazy; jeśli baza poszła do przodu, scala ją do gałęzi epicu — konflikt

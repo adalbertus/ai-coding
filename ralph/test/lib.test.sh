@@ -466,6 +466,24 @@ expect_fail "issue parent: other gh failure -> error, not 'no parent'" \
   env PATH="$fake_gh_dir:$PATH" FAKE_GH_MODE=down bash -c ". '$SCRIPT_DIR/../lib.sh'; ralph_issue_parent 13"
 rm -rf "$fake_gh_dir"
 
+# --- ralph_filter_unblocked: issues with an open blocker are dropped ---
+mk() { jq -cn --argjson n "$1" --arg b "$2" '{number: $n, title: "t", body: $b}'; }
+blk() { printf '## What\nx\n\n## Blocked by\n\n%s\n\n## Other\nsee #99\n' "$1"; }
+unblocked() { printf '%s\n' "$@" | jq -cs '.' | ralph_filter_unblocked "$OPEN" | nums; }
+OPEN='[12,30]'
+expect_eq "unblocked: #12 open -> rejected" "$(unblocked "$(mk 1 "$(blk '- #12')")")" ""
+expect_eq "unblocked: bare 12 open -> rejected" "$(unblocked "$(mk 1 "$(blk '- 12')")")" ""
+expect_eq "unblocked: closed blocker -> passes" "$(unblocked "$(mk 1 "$(blk '- #13')")")" "1"
+expect_eq "unblocked: None -> passes" "$(unblocked "$(mk 1 "$(blk 'None - can start immediately')")")" "1"
+expect_eq "unblocked: no section -> passes" "$(unblocked "$(mk 1 '## What
+x #12')")" "1"
+expect_eq "unblocked: null body -> passes" "$(unblocked '{"number":1,"title":"t","body":null}')" "1"
+expect_eq "unblocked: several, one open -> rejected" "$(unblocked "$(mk 1 "$(blk '- #13
+- #12')")")" ""
+expect_eq "unblocked: number after the section is ignored" "$(unblocked "$(mk 1 "$(blk '- #13')")")" "1"
+expect_eq "unblocked: keeps order of the free ones" "$(unblocked "$(mk 1 "$(blk '- #12')")" "$(mk 2 "$(blk 'None')")" "$(mk 3 "$(blk '- 5')")")" "2,3"
+expect_eq "unblocked: no open issues -> all pass" "$(printf '%s' "$(mk 1 "$(blk '- #12')")" | jq -cs . | ralph_filter_unblocked '[]' | nums)" "1"
+
 echo
 echo "Wynik: $pass OK, $fail FAIL"
 [ "$fail" = 0 ]

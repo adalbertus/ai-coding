@@ -440,6 +440,23 @@ ralph_epic_issues() {
   jq -c --argjson epic "$1" '[.[] | select(.parent == $epic)]'
 }
 
+# stdin: issues array (with `body`); $1: JSON array of numbers of all open issues. Drops every
+# issue whose "Blocked by" section (heading line up to the next heading) mentions an open issue,
+# as `#12` or bare `12`. No section, or "None - can start immediately" -> passes.
+ralph_filter_unblocked() {
+  jq -c --argjson open "$1" '
+    map(select(
+      (.body // "" | split("\n")) as $l
+      | (first(range(0; $l | length) | select($l[.] | test("^#+\\s*blocked by"; "i"))) // null) as $s
+      | if $s == null then true
+        else
+          ($l[$s + 1:]) as $rest
+          | (first(range(0; $rest | length) | select($rest[.] | test("^#"))) // ($rest | length)) as $e
+          | [$rest[:$e][] | match("[0-9]+"; "g") | .string | tonumber]
+          | all(.[]; . as $n | $open | index($n) | not)
+        end))'
+}
+
 # --- Epic branch (ADR 0012). Opt-in per repo with one line in the "## Ralph" section. ---
 # Syntax (fixed English key whatever the section's language, so bash reads it reliably), alone on
 # its own line; a leading list marker and backticks around the value are tolerated:
