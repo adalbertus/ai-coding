@@ -389,6 +389,33 @@ expect_eq "annotate: parent filled from epics' open lists" \
 expect_eq "epic issues: only the named epic's sub-issues" "$(ralph_epic_issues 20 <<<"$I_ONE" | nums)" "21"
 expect_eq "epic issues: epic without open sub-issues -> empty" "$(ralph_epic_issues 99 <<<"$I_ONE" | nums)" ""
 
+# --- Epic stage (ADR 0013): AFK first, then HITL ---
+L_AFK='[{"name":"ready-for-agent"}]'
+L_HITL='[{"name":"bug"}]'
+S_BOTH="[{\"number\":1,\"labels\":$L_HITL},{\"number\":2,\"labels\":$L_AFK},{\"number\":3,\"labels\":$L_AFK}]"
+expect_eq "stage: free AFK present -> only AFK" "$(ralph_epic_stage <<<"$S_BOTH" | nums)" "2,3"
+S_HITL="[{\"number\":1,\"labels\":$L_HITL},{\"number\":4,\"labels\":[]}]"
+expect_eq "stage: no AFK, free HITL -> HITL" "$(ralph_epic_stage <<<"$S_HITL" | nums)" "1,4"
+BLK_H=$'## Blocked by\n\n- #9'
+S_BLK="[{\"number\":1,\"labels\":$L_HITL,\"body\":\"$(printf '%s' "$BLK_H" | jq -Rs . | sed 's/^"//;s/"$//')\"}]"
+expect_eq "stage: blocked HITL dropped by filter -> nothing" \
+  "$(ralph_filter_unblocked '[9]' <<<"$S_BLK" | ralph_epic_stage | nums)" ""
+expect_eq "stage: blocked AFK, free HITL -> HITL" \
+  "$(jq -c '[.[0] + {labels: [{"name":"ready-for-agent"}]}] + [{"number":7,"labels":[],"body":""}]' <<<"$S_BLK" \
+    | ralph_filter_unblocked '[9]' | ralph_epic_stage | nums)" "7"
+expect_eq "stage: empty -> empty" "$(ralph_epic_stage <<<'[]' | nums)" ""
+
+# --- Exit code of a finished run ---
+expect_eq "outcome: closed (afk) -> 0" "$(ralph_run_outcome afk closed false)" "0"
+expect_eq "outcome: closed (hitl) -> 0" "$(ralph_run_outcome hitl closed false)" "0"
+expect_eq "outcome: afk open, still labelled -> 3" "$(ralph_run_outcome afk open true)" "3"
+expect_eq "outcome: afk open, label removed -> 4" "$(ralph_run_outcome afk open false)" "4"
+expect_eq "outcome: hitl open, no label -> 5" "$(ralph_run_outcome hitl open false)" "5"
+expect_eq "outcome: hitl open, label restored -> 6" "$(ralph_run_outcome hitl open true)" "6"
+expect_eq "outcome: unreadable state -> 1" "$(ralph_run_outcome afk '' false)" "1"
+expect_eq "outcome: codes are distinct" \
+  "$(printf '%s\n' "$RALPH_EXIT_DONE" "$RALPH_EXIT_ERROR" "$RALPH_EXIT_NOTHING" "$RALPH_EXIT_AFK_FAILED" "$RALPH_EXIT_DISCOVERED" "$RALPH_EXIT_HITL_OPEN" "$RALPH_EXIT_HITL_TO_AFK" | sort -u | wc -l | tr -d ' ')" "7"
+
 # --- Epic branch (ADR 0012) ---
 SECTION_WITH=$'## Ralph\n\n### Commit\n\nralph-base-branch: dev\n\n- Polish message.'
 expect_eq "base branch: line present -> branch name" "$(ralph_base_branch <<<"$SECTION_WITH")" "dev"

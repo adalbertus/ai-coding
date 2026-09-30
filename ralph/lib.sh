@@ -532,6 +532,41 @@ ralph_epic_issues() {
   jq -c --argjson epic "$1" '[.[] | select(.parent == $epic)]'
 }
 
+# stdin: issues array (already unblocked, each with `labels: [{name}]`). ADR 0013 order inside an
+# epic: AFK (has `ready-for-agent`) first; only when none is left, the HITL ones (no label).
+ralph_epic_stage() {
+  jq -c '
+    def afk: any(.labels[]?; .name == "ready-for-agent");
+    ([.[] | select(afk)]) as $a
+    | if ($a | length) > 0 then $a else [.[] | select(afk | not)] end'
+}
+
+# Exit codes of once.sh (documented in its header).
+RALPH_EXIT_DONE=0        # issue closed
+RALPH_EXIT_ERROR=1       # error or refusal
+RALPH_EXIT_NOTHING=2     # nothing to do
+RALPH_EXIT_AFK_FAILED=3  # AFK run left the issue open, still ready-for-agent
+RALPH_EXIT_DISCOVERED=4  # AFK run left it open without ready-for-agent (discovered HITL)
+RALPH_EXIT_HITL_OPEN=5   # HITL session ended, issue open without ready-for-agent
+RALPH_EXIT_HITL_TO_AFK=6 # HITL session ended, issue open with ready-for-agent restored
+
+# Pure: the exit code for a finished worker run. $1: mode (afk|hitl); $2: issue state
+# (open|closed); $3: "true" when the issue has `ready-for-agent`. Anything but a clean
+# `closed`/`open` reading is an error.
+ralph_run_outcome() {
+  local mode="$1" state="$2" label="$3"
+  case "$state" in
+    closed) echo "$RALPH_EXIT_DONE"; return 0 ;;
+    open) ;;
+    *) echo "$RALPH_EXIT_ERROR"; return 0 ;;
+  esac
+  if [ "$mode" = hitl ]; then
+    if [ "$label" = true ]; then echo "$RALPH_EXIT_HITL_TO_AFK"; else echo "$RALPH_EXIT_HITL_OPEN"; fi
+  else
+    if [ "$label" = true ]; then echo "$RALPH_EXIT_AFK_FAILED"; else echo "$RALPH_EXIT_DISCOVERED"; fi
+  fi
+}
+
 # stdin: issues array (with `body`); $1: JSON array of numbers of all open issues. Drops every
 # issue whose "Blocked by" section (heading line up to the next heading) mentions an open issue,
 # as `#12` or bare `12`. No section, or "None - can start immediately" -> passes.

@@ -280,6 +280,25 @@ sub-issue) z otwartymi sub-issues, selektor dostaje tylko sub-issues najstarszeg
 pracuje nad sub-issue wskazanego epicu; epic bez otwartych sub-issues daje komunikat i wyjście bez
 workera. Tak przeskakuje się na pilny epic.
 
+**Kolejność w epicu: AFK, potem HITL** (ADR 0013). `ralph-once <nr epicu>` najpierw bierze
+niezablokowane sub-issues z `ready-for-agent` (selektor dostaje tylko je). Dopiero gdy żadnego nie
+ma, ten sam selektor wybiera jedno niezablokowane otwarte sub-issue bez tej etykiety i otwiera dla
+niego sesję HITL. Zablokowane HITL nie są brane; gdy nic nie zostaje — wyjście bez workera. Wybór
+to czysta funkcja `ralph_epic_stage` w `lib.sh`, po filtrze blokerów.
+
+**Kody wyjścia `ralph-once`** (kontrakt w nagłówku `ralph/once.sh`; kod wynika ze stanu issue po
+runie, nie z wyniku procesu workera):
+
+| Kod | Znaczenie |
+|-----|-----------|
+| 0 | issue domknięte |
+| 1 | błąd lub odmowa: złe argumenty, brak issue, zajęty lock, strażnik, brudne drzewo, konflikt scalania |
+| 2 | nic do zrobienia: bramka `needs-human-test`, epic w odbiorze, brak lub zablokowani kandydaci, `NO_TASK` |
+| 3 | run AFK zostawił issue otwarte i nadal z `ready-for-agent` (porażka, praca niedokończona) |
+| 4 | run AFK zostawił issue otwarte bez `ready-for-agent` (odkryty HITL) |
+| 5 | sesja HITL skończona, issue otwarte i bez `ready-for-agent` (nierozwiązane) |
+| 6 | sesja HITL skończona, issue otwarte z przywróconym `ready-for-agent` (wraca do AFK) |
+
 **Blokery rozstrzyga skrypt.** Przed selektorem (w pętli i w trybie epicu) `lib.sh` czyta z sekcji
 „Blocked by” każdego kandydata numery issues (`#12` i `12`) i odrzuca kandydata, jeśli którykolwiek
 bloker jest otwarty (czysta funkcja `ralph_filter_unblocked`). Selektor dostaje tylko wolne issues

@@ -8,6 +8,17 @@
 # An issue without `ready-for-agent` (HITL) opens an interactive session; without a number only AFK is taken.
 # `ralph-once <epic>` ([PRD] prefix) works one of that epic's open sub-issues, picked by the selector.
 # In loop mode a started epic (>=1 closed sub-issue) is finished before others are touched (ADR 0012).
+# Inside an epic, free AFK sub-issues go first; only when none is left does the same selector pick a
+# free HITL one (no `ready-for-agent`) and a HITL session opens (ADR 0013).
+#
+# Exit codes (the run's result, for callers such as ralph-epic):
+#   0  issue closed
+#   1  error or refusal (bad args, missing issue, busy lock, guard halt, dirty tree, merge conflict)
+#   2  nothing to do (gate `needs-human-test`, epic awaiting acceptance, no/blocked candidates, NO_TASK)
+#   3  AFK run left the issue open and it still has `ready-for-agent` (failure, unfinished work)
+#   4  AFK run left the issue open without `ready-for-agent` (discovered HITL)
+#   5  HITL session ended, issue open without `ready-for-agent` (unresolved)
+#   6  HITL session ended, issue open with `ready-for-agent` restored (handed back to AFK)
 
 # Self-locate: this script + its sibling prompts/guard live together (in the shared ralph/
 # dir, reached via a symlink on PATH). `realpath` resolves that symlink so prompts are read
@@ -15,11 +26,11 @@
 SCRIPT_DIR="$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")" && pwd)"
 . "$SCRIPT_DIR/lib.sh"
 
-ralph_parse_args ralph-once "$@" || exit 1
-ralph_require_runtime "$RALPH_RUNTIME" || exit 1
+ralph_parse_args ralph-once "$@" || exit "$RALPH_EXIT_ERROR"
+ralph_require_runtime "$RALPH_RUNTIME" || exit "$RALPH_EXIT_ERROR"
 ISSUE_ARG="$RALPH_ISSUE_ARG"
 
-ralph_acquire_lock "${ISSUE_ARG:-selector}" || exit 0
+ralph_acquire_lock "${ISSUE_ARG:-selector}" || exit "$RALPH_EXIT_ERROR"
 ralph_trap_release_lock
 
 # Epics whose sub-issues are all closed get `needs-human-test` from here, not from the worker —
@@ -41,21 +52,21 @@ if [ -z "$ISSUE_ARG" ]; then
     echo "⏳ Zaimplementowane, czekają na weryfikację przez człowieka (needs-human-test)."
     echo "   Sprawdź i zamknij, zanim ruszę po nową pracę:"
     echo "$pending"
-    exit 0
+    exit "$RALPH_EXIT_NOTHING"
   fi
 fi
 
 # Strażnik (fail-closed): refuse to run unless this repo declares a usable "## Ralph" section
 # in the selected runtime's native contract file. On halt it prints the reason + how to fix and
-# exits non-zero, so `|| exit 0` stops the loop cleanly (the message is already on screen).
-"$SCRIPT_DIR/preflight.sh" "$RALPH_RUNTIME" || exit 0
+# exits non-zero, so the refusal code stops the loop (the message is already on screen).
+"$SCRIPT_DIR/preflight.sh" "$RALPH_RUNTIME" || exit "$RALPH_EXIT_ERROR"
 
 # Optional epic branch (ADR 0012): a `ralph-base-branch: <base>` line in ## Ralph. Absent ->
 # trunk, the loop never switches branches. When set, a dirty tree is refused here already, so
 # no selector tokens are spent on a run that could not switch branches anyway.
-base_branch=$(ralph_contract_section "$(ralph_contract_file "$RALPH_RUNTIME")" | ralph_base_branch) || exit 1
+base_branch=$(ralph_contract_section "$(ralph_contract_file "$RALPH_RUNTIME")" | ralph_base_branch) || exit "$RALPH_EXIT_ERROR"
 if [ -n "$base_branch" ]; then
-  ralph_require_clean_tree || exit 1
+  ralph_require_clean_tree || exit "$RALPH_EXIT_ERROR"
 fi
 
 # 1. Recent history, for both the selector and the worker.
@@ -71,7 +82,7 @@ if [ -n "$ISSUE_ARG" ]; then
   title=$(gh issue view "$num" --json title --jq .title 2>/dev/null) || true
   if [ -z "$title" ]; then
     echo "Nie znalazłem issue #${num} w tym repo."
-    exit 1
+    exit "$RALPH_EXIT_ERROR"
   fi
   case "$title" in
     "[PRD]"*) EPIC_ARG="$num" ;;
@@ -104,12 +115,17 @@ if [ -z "$ISSUE_ARG" ] || [ -n "$EPIC_ARG" ]; then
     if [ "${open_count:-0}" = 0 ]; then
       ralph_mark_epic_if_ready "$EPIC_ARG" || true
       echo "Epic #${EPIC_ARG} nie ma otwartych sub-issues — czeka na odbiór albo jest skończony. Nie uruchamiam workera."
-      exit 0
+      exit "$RALPH_EXIT_NOTHING"
     fi
   fi
 
-  issues_json=$(gh issue list --label ready-for-agent --state open --limit 200 \
-    --json number,title,body 2>/dev/null | jq -c 'map(select(.title | startswith("[PRD]") | not))')
+  # Epic mode also needs the HITL sub-issues (no `ready-for-agent`), so fetch labels too and
+  # narrow to AFK here for the loop; ralph_epic_stage does the AFK-then-HITL choice for an epic.
+  issues_json=$(gh issue list --state open --limit 200 \
+    --json number,title,body,labels 2>/dev/null | jq -c 'map(select(.title | startswith("[PRD]") | not))')
+  if [ -z "$EPIC_ARG" ]; then
+    issues_json=$(jq -c 'map(select(any(.labels[]?; .name == "ready-for-agent")))' <<<"${issues_json:-[]}")
+  fi
   issues_json=$(ralph_annotate_parents "$epics" <<<"${issues_json:-[]}")
   if [ -n "$EPIC_ARG" ]; then
     issues_json=$(ralph_epic_issues "$EPIC_ARG" <<<"$issues_json")
@@ -123,13 +139,20 @@ if [ -z "$ISSUE_ARG" ] || [ -n "$EPIC_ARG" ]; then
   issues_json=$(ralph_filter_unblocked "${open_numbers:-[]}" <<<"$issues_json")
   if [ "$candidates" -gt 0 ] && [ "$(jq -r 'length' <<<"$issues_json")" = 0 ]; then
     echo "Wszystkie kandydaty są zablokowane (otwarty bloker w sekcji „Blocked by”). Nie wywołuję selektora."
-    exit 0
+    exit "$RALPH_EXIT_NOTHING"
+  fi
+  if [ -n "$EPIC_ARG" ]; then
+    issues_json=$(ralph_epic_stage <<<"$issues_json")
+    if ! jq -e 'any(.[]; any(.labels[]?; .name == "ready-for-agent"))' <<<"$issues_json" >/dev/null 2>&1 \
+        && [ "$(jq -r 'length' <<<"$issues_json")" -gt 0 ]; then
+      echo "Epic #${EPIC_ARG}: nie ma wolnych issues AFK — wybieram sesję HITL."
+    fi
   fi
   issues=$(jq -r '.[] | "## Issue #\(.number): \(.title)\n\n\(.body)\n"' <<<"$issues_json")
 
   if [ -z "$issues" ]; then
     echo "Brak otwartych zadań (ready-for-agent). Nie ma nic do zrobienia."
-    exit 0
+    exit "$RALPH_EXIT_NOTHING"
   fi
 
   # Stage 1 — cheap selector. Picks ONE issue number (or NO_TASK). Tool-free, so it
@@ -143,7 +166,7 @@ if [ -z "$ISSUE_ARG" ] || [ -n "$EPIC_ARG" ]; then
 
   if [ -z "$num" ] || [ "$num" = "NO_TASK" ]; then
     echo "Selektor nie wskazał żadnego zadania (odpowiedź: '${selection}'). Nie ma nic do zrobienia."
-    exit 0
+    exit "$RALPH_EXIT_NOTHING"
   fi
 
   echo "Selektor wybrał issue #${num}; ustalam etykietę complexity..."
@@ -174,9 +197,9 @@ if [ -n "$base_branch" ]; then
     parent=$(jq -r --argjson n "$num" 'first(.[] | select(.number == $n) | .parent) // empty' <<<"$issues_json")
   elif ! parent=$(ralph_issue_parent "$num"); then
     echo "Nie udało się ustalić epicu issue #${num} (gh api); nie przełączam gałęzi, nie uruchamiam workera."
-    exit 1
+    exit "$RALPH_EXIT_ERROR"
   fi
-  ralph_prepare_branch "$base_branch" "$parent" || exit 1
+  ralph_prepare_branch "$base_branch" "$parent" || exit "$RALPH_EXIT_ERROR"
   # The worker should see the history of the branch it will commit to.
   commits=$(git log -n 5 --format="%H%n%ad%n%B---" --date=short 2>/dev/null || echo "No commits found")
 fi
@@ -211,3 +234,8 @@ ralph_mark_ready_epics
 # Auto mode denies without prompting, so a run that could not finish (e.g. the commit was
 # blocked) now ends quietly. Uncommitted leftovers would poison the NEXT run — say it out loud.
 ralph_warn_dirty_tree
+
+# The result of the run is the state of the issue afterwards, not the worker's own exit status.
+state=$(gh issue view "$num" --json state --jq '.state | ascii_downcase' 2>/dev/null)
+has_label=$(gh issue view "$num" --json labels --jq 'any(.labels[]; .name == "ready-for-agent")' 2>/dev/null)
+exit "$(ralph_run_outcome "$mode" "$state" "$has_label")"

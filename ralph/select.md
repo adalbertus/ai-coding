@@ -17,6 +17,8 @@ Your ONLY job is to choose the single next issue to work — you do NOT implemen
 - Skip any issue that plainly needs a human decision (architectural choice, design review,
   an ambiguous trade-off the body does not settle, or a destructive/irreversible step),
   even though it carries `ready-for-agent` — it may be mislabelled.
+  This rule does not apply to issues that do not carry `ready-for-agent`: those are HITL on
+  purpose and a human will be present, so pick among them by priority alone.
 - Among the remaining eligible issues, pick by this priority order:
   1. Critical bugfixes
   2. Development infrastructure (tests, types, dev scripts)
