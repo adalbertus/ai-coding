@@ -188,9 +188,22 @@ strumieniowym wyjściem JSON. Worker kończy się sam po domknięciu issue. Na e
 krótką linię na krok (`▸ Bash: bash test.sh`, `▸ Edit: greet.sh`) i na końcu podsumowanie modelu.
 Codex też jedzie **bez nadzoru**: `codex exec --json --approve-for-me` (eskalacje sandboxa idą
 przez automatyczny review; flaga jest w `codex exec` od wersji 0.159). Na ekranie ta sama jedna
-linia na krok (`▸ Bash: …`, `▸ Edit: …`, `▸ Write: …`) i podsumowanie modelu. Sesja HITL na
-Codeksie to nadal interaktywne `codex --no-alt-screen --approve-for-me`. W obu runtime'ach celem
-jest AFK bez `dangerously-bypass-*`.
+linia na krok (`▸ Bash: …`, `▸ Edit: …`, `▸ Write: …`) i podsumowanie modelu. W obu runtime'ach
+celem jest AFK bez `dangerously-bypass-*`.
+
+**Sesja HITL.** Tryb workera wynika z issue, nie z komendy. Issue z labelką `ready-for-agent`
+idzie bez nadzoru (jak wyżej); issue bez niej to HITL i `ralph-once <nr>` otwiera dla niego
+sesję **interaktywną** (`claude --permission-mode auto` albo `codex --no-alt-screen
+--approve-for-me`) z osobnym promptem `ralph/prompt-hitl.md`. Worker zaczyna od tego, jaka decyzja
+lub czynność jest potrzebna od Ciebie, z rekomendacją; po Twojej odpowiedzi implementuje i domyka
+issue tymi samymi regułami co przebieg AFK (w tym odchylenia w epicu). `ralph-once` bez numeru
+nadal bierze wyłącznie AFK.
+
+**Odkryty HITL i oddanie issue pętli.** Jeśli worker AFK w sanity checku stwierdzi, że issue
+wymaga decyzji albo czynności człowieka, zdejmuje z niego `ready-for-agent`, komentuje, czego
+dokładnie trzeba (z rekomendacją), i kończy run. Issue nie wraca do pętli samo: gdy sprawa jest
+rozstrzygnięta, oddajesz je pętli, przywracając labelkę
+(`gh issue edit <nr> --add-label ready-for-agent`).
 
 **Zapis runu (Claude i Codex).** Pełny strumień JSON ląduje w `.git/ralph-logs/` (plik
 `<data>-<godzina>-issue-<nr>.jsonl`, dla `ralph-once-local` `…-local.jsonl`). Katalog powstaje

@@ -5,6 +5,7 @@
 #   2. its `complexity:*` label is mapped to a model, and that model implements it.
 #
 # `ralph-once <n>` runs issue <n> directly, skipping stage 1 (and the selector's token cost).
+# An issue without `ready-for-agent` (HITL) opens an interactive session; without a number only AFK is taken.
 # `ralph-once <epic>` ([PRD] prefix) works one of that epic's open sub-issues, picked by the selector.
 # In loop mode a started epic (>=1 closed sub-issue) is finished before others are touched (ADR 0012).
 
@@ -148,9 +149,8 @@ fi
 #    stable (complexity is intrinsic, the model/effort du jour is not). Cheap tiers run at
 #    lower effort so trivial work stops burning high-effort thinking tokens; heavy keeps the
 #    top effort. An untagged issue is treated as 'normal' (safe default).
-complexity=$(gh issue view "$num" --json labels \
-  --jq '[.labels[].name | select(startswith("complexity:"))][0] // "complexity:normal" | sub("complexity:"; "")' \
-  2>/dev/null)
+labels=$(gh issue view "$num" --json labels --jq '.labels[].name' 2>/dev/null)
+complexity=$(printf '%s\n' "$labels" | sed -n 's/^complexity://p' | head -1)
 complexity="${complexity:-normal}"
 
 ralph_model_for_complexity "$RALPH_RUNTIME" "$complexity"
@@ -179,7 +179,15 @@ fi
 # 5. Stage 2 — implement ONLY the selected issue, on the chosen model.
 issue=$(gh issue view "$num" --json number,title,body \
   --jq '"## Issue #\(.number): \(.title)\n\n\(.body)\n"' 2>/dev/null)
-prompt=$(ralph_render_prompt "$RALPH_RUNTIME" "$SCRIPT_DIR/prompt.md")
+# The mode follows from the issue: ready-for-agent -> unattended, otherwise an interactive HITL
+# session with its own prompt. Loop mode only ever selects ready-for-agent issues.
+mode=$(ralph_worker_mode <<<"$labels")
+if [ "$mode" = "hitl" ]; then
+  echo "Issue #${num} nie ma ready-for-agent — to HITL: otwieram sesję interaktywną z człowiekiem."
+  prompt=$(ralph_render_prompt "$RALPH_RUNTIME" "$SCRIPT_DIR/prompt-hitl.md")
+else
+  prompt=$(ralph_render_prompt "$RALPH_RUNTIME" "$SCRIPT_DIR/prompt.md")
+fi
 
 echo "Zaczynam implementację issue #${num} przez runtime ${RALPH_RUNTIME} na $(ralph_model_display "$RALPH_RUNTIME" "$model" "$effort")..."
 # Claude runs unattended via `claude -p` (stream-json; see ralph_run_claude_worker) and ends on
@@ -187,9 +195,10 @@ echo "Zaczynam implementację issue #${num} przez runtime ${RALPH_RUNTIME} na $(
 # Bash call outside the user's allowlist — `git commit`, `gh issue close`, the ## Ralph feedback
 # loops — still stops for approval, and an AFK loop hangs. Auto mode is Claude Code's default:
 # a classifier vets each tool call for risk and prompt injection. Codex runs unattended too, via
-# `codex exec --json --approve-for-me` (see ralph_run_codex_worker); its interactive CLI is the HITL session.
+# `codex exec --json --approve-for-me` (see ralph_run_codex_worker). HITL issues (no ready-for-agent)
+# get the interactive CLI of either runtime instead.
 ralph_run_worker "$RALPH_RUNTIME" "$model" "$effort" \
-  "Previous commits: $commits Issue to work (work ONLY this one): $issue $prompt" "issue-${num}"
+  "Previous commits: $commits Issue to work (work ONLY this one): $issue $prompt" "issue-${num}" "$mode"
 
 # Auto mode denies without prompting, so a run that could not finish (e.g. the commit was
 # blocked) now ends quietly. Uncommitted leftovers would poison the NEXT run — say it out loud.

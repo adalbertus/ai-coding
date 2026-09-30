@@ -343,13 +343,29 @@ ralph_run_codex_interactive() {
   codex "${args[@]}" "$prompt"
 }
 
-# $6: mode, `afk` (default, unattended) or `hitl` (interactive; only affects Codex).
+# stdin: an issue's label names, one per line -> `afk` (has ready-for-agent: unattended) or
+# `hitl` (does not: a human is present, the worker runs interactively).
+ralph_worker_mode() {
+  if grep -qx 'ready-for-agent'; then echo afk; else echo hitl; fi
+}
+
+# Claude HITL session: the interactive CLI in auto mode, so the human can talk to the worker.
+ralph_run_claude_interactive() {
+  local model="$1" effort="$2" prompt="$3"
+  claude --permission-mode auto --model "$model" --effort "$effort" "$prompt"
+}
+
+# $6: mode, `afk` (default, unattended) or `hitl` (interactive session with a human present).
 ralph_run_worker() {
   local runtime="$1" model="$2" effort="$3" prompt="$4" label="${5:-}" mode="${6:-afk}"
 
   case "$runtime" in
     claude)
-      ralph_run_claude_worker "$model" "$effort" "$prompt" "$label"
+      if [ "$mode" = "hitl" ]; then
+        ralph_run_claude_interactive "$model" "$effort" "$prompt"
+      else
+        ralph_run_claude_worker "$model" "$effort" "$prompt" "$label"
+      fi
       ;;
     codex)
       if [ "$mode" = "hitl" ]; then

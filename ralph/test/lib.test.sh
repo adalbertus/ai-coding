@@ -97,12 +97,21 @@ expect_eq "contract section stops at the next level-2 heading" \
   $'## Ralph\n\nRun `npm test`.\n\n### Done\ngreen'
 rm -f "$tmp_contract"
 
+# Worker mode follows from the issue's labels: ready-for-agent -> unattended, otherwise interactive.
+expect_eq "mode: ready-for-agent -> afk" \
+  "$(printf '%s\n' ready-for-agent complexity:normal | ralph_worker_mode)" "afk"
+expect_eq "mode: no ready-for-agent -> hitl" \
+  "$(printf '%s\n' complexity:normal bug | ralph_worker_mode)" "hitl"
+expect_eq "mode: no labels -> hitl" "$(ralph_worker_mode </dev/null)" "hitl"
+expect_eq "mode: similar label is not ready-for-agent" \
+  "$(printf '%s\n' not-ready-for-agent | ralph_worker_mode)" "hitl"
+
 # Golden files: for the `claude` branch this is a gate — that prose is in daily use and must not
 # drift as a side effect of a Codex change. For `codex` it is a magnifying glass: the prose is
 # being tuned against context measurements, and every version has to be visible in git history.
 # A deliberate change to either means regenerating them: UPDATE_GOLDEN=1 bash ralph/test/lib.test.sh
 GOLDEN_DIR="$SCRIPT_DIR/golden"
-for prompt_file in prompt prompt-local; do
+for prompt_file in prompt prompt-hitl prompt-local; do
   for runtime in claude codex; do
     golden="$GOLDEN_DIR/$prompt_file.$runtime.md"
     rendered=$(ralph_render_prompt "$runtime" "$SCRIPT_DIR/../$prompt_file.md")
@@ -170,6 +179,24 @@ expect_eq "Codex HITL worker starts interactive CLI with auto-review" \
   $'--no-alt-screen\n--approve-for-me\n-C\n'"$PWD"$'\n-m\ngpt-test\n-c\nmodel_reasoning_effort="low"\nPROMPT'
 
 rm -rf "$fake_codex_dir"
+
+fake_hc_dir=$(mktemp -d)
+mkdir "$fake_hc_dir/bin"
+cat > "$fake_hc_dir/bin/claude" <<'FAKE_CLAUDE'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "$CLAUDE_ARGV_CAPTURE"
+FAKE_CLAUDE
+chmod +x "$fake_hc_dir/bin/claude"
+(
+  PATH="$fake_hc_dir/bin:$PATH"
+  CLAUDE_ARGV_CAPTURE="$fake_hc_dir/worker.argv"
+  export CLAUDE_ARGV_CAPTURE
+  ralph_run_worker claude sonnet low "PROMPT" issue-13 hitl >/dev/null
+)
+expect_eq "Claude HITL worker starts interactive session (no -p) in auto mode" \
+  "$(cat "$fake_hc_dir/worker.argv")" \
+  $'--permission-mode\nauto\n--model\nsonnet\n--effort\nlow\nPROMPT'
+rm -rf "$fake_hc_dir"
 
 # --- Claude worker: stream renderer + unattended adapter ---
 stream_fixture=$(cat <<STREAM
