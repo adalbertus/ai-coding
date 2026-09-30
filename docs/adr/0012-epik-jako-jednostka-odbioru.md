@@ -1,5 +1,7 @@
 # Epik jako jednostka odbioru; sub-issues zamyka gate
 
+_Rozwinięte przez ADR 0013 (autonomiczny epic)._
+
 Zmienia ADR 0008 (gdzie leży PRD) i ADR 0011 (gdzie leży scenariusz ręczny).
 
 **Kontekst.** W `finanse-rsz-laravel` 153 zamknięte issues przeszły przez `needs-human-test`,

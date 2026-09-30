@@ -1,5 +1,7 @@
 # Ralph jedzie w auto mode, nie w acceptEdits
 
+_Zmienione przez ADR 0013 (worker bez nadzoru dla AFK, sesja HITL dla człowieka)._
+
 **Kontekst.** `ralph-once` z założenia jedzie AFK, ale sesja regularnie wisiała na zatwierdzeniu
 człowieka. Przyczyna nie była losowa: `--permission-mode acceptEdits` auto-akceptuje **wyłącznie
 edycje plików**, więc każde wywołanie `Bash` spoza allowlisty użytkownika nadal pyta. Allowlista

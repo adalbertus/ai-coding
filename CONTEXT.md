@@ -156,9 +156,10 @@ complexity→model mapping lives only in the loop script, so labels stay stable 
 _Avoid_: putting a model name in the label; conflating it with blast radius.
 
 **needs-human-test**:
-An epic whose last sub-issue has closed, awaiting odbiór — or, for a task with no epic, a task
+An epic whose sub-issues are all closed, awaiting odbiór — or, for a task with no epic, a task
 implemented but awaiting a human to verify it. While one is open, the GitHub loop refuses to start
-new work. Applied by the worker after implementation, never at triage.
+new work. On an epic it is applied by the loop itself once no sub-issue is open, whoever closed
+the last one; on a task with no epic, by the worker after implementation. Never at triage.
 
 **Odbiór** (acceptance):
 A human judging whether what shipped is what they *want* — layout, wording, placement, "actually,
@@ -168,7 +169,9 @@ _Avoid_: using "manual test" for both; treating odbiór as a gap an e2e suite wi
 
 **AFK / HITL**:
 AFK = a task fit to run unsupervised (label `ready-for-agent`); HITL = one needing a human
-decision (won't carry the label). The selektor and worker only touch AFK tasks.
+decision or a human action (won't carry the label). The selektor and worker only touch AFK tasks.
+A task planned as AFK that the worker finds needs a human becomes HITL: the worker drops the label
+and says in the thread what is needed; the human restores the label once it is resolved.
 
 **PRD** (product requirements doc):
 In this repo, a synthesis of a finished grill whose value is entirely up-front: it denoises a
@@ -177,12 +180,29 @@ breakdown uses as a coverage checklist. Nobody reads it afterwards; it is stored
 the epic only because that issue exists anyway, so storing it costs nothing.
 _Avoid_: treating it as a spec anyone reads later, a `tmp/` file, or a reason to publish anything.
 
-**Epik** (epic):
+**Epic**:
 A parent issue grouping the sub-issues produced by one breakdown; the unit of odbiór. It carries
 the PRD and the scenario for its odbiór. Its sub-issues are closed on the automated gate alone
 and carry no manual-verification section; the epic awaits odbiór once its last sub-issue closes.
 Every piece of work is an epic, even a one-line change: an epic with a single sub-issue.
-_Avoid_: calling the parent "PRD" — the PRD is only what it happens to carry.
+_Avoid_: calling the parent "PRD" — the PRD is only what it happens to carry; the Polish "epik".
+
+**Gałąź bazowa** (base branch):
+The branch a repo's epics start from and are merged back into after odbiór — e.g. `dev` where
+`main` is production. Declared per repo; a repo without one works on its trunk and has no
+gałąź epicu.
+
+**Gałąź epicu** (epic branch):
+A branch holding one epic's work until odbiór, so that the gałąź bazowa only ever contains
+accepted epics and a hotfix can ship without half of another epic. It takes in the gałąź bazowa
+before every run; a conflict stops the loop.
+_Avoid_: "feature branch" — its scope is exactly one epic.
+
+**Sesja HITL** (HITL session):
+The worker run for a HITL task: interactive, because a human is present by definition. It opens
+by stating what decision or action is needed, with a recommendation, then implements and closes
+the task like any other. An AFK task runs unattended and ends on its own; which of the two a run
+is follows from the task, not from the command that started it.
 
 ## Sesja deliberacyjna (`/sesja`)
 
