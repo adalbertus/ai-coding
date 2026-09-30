@@ -206,6 +206,9 @@ Prompty są stack-agnostyczne — całą specyfikę repo delegują do sekcji `##
 - **doc-sync** (opcjonalnie) — trwałe dokumenty repo (known-gaps, backlog) i ich klasa; zamykając
   issue worker/człowiek najpierw godzi je z tym, co weszło. Słownik (`CONTEXT.md`) i ADR-y tylko
   się zgłasza, nie przepisuje. Bierny, gdy repo nie ma trwałych dokumentów.
+- **gałąź per epik** (opcjonalnie) — jedna linia o stałej składni `ralph-base-branch: <gałąź>`
+  (np. `ralph-base-branch: dev`), osobno w swojej linii. Brak linii = trunk. Zła składnia zatrzymuje
+  pętlę z komunikatem.
 
 Sekcję pisze `/ralph-konfiguracja` — nie pisz jej ręcznie.
 
@@ -231,6 +234,14 @@ Wybór pracy zna epiki: w trybie pętli, jeśli istnieje **rozpoczęty epik** (c
 zamknięte sub-issue) z otwartymi sub-issues, selektor dostaje tylko sub-issues najstarszego takiego
 epiku (filtr w `lib.sh`, czysta funkcja). `ralph-once <nr epiku>` pracuje nad jego sub-issue;
 epik bez otwartych sub-issues daje komunikat i wyjście bez workera.
+
+**Gałąź per epik** (gdy `## Ralph` ma `ralph-base-branch: <baza>`): `ralph-once` przed workerem
+odmawia przy brudnym drzewie, a potem dla sub-issue przełącza się na `epik/<nr epiku>` (pierwszy
+raz tworzy ją z bazy; jeśli baza poszła do przodu, scala ją do gałęzi epiku — konflikt przerywa
+merge, zostawia czyste drzewo i kończy bez workera, kodem 1). Issue bez rodzica idzie na bazie.
+Worker commituje na bieżącej gałęzi, a repo zostaje na niej pod odbiór lokalny. Wszystko lokalnie,
+bez `fetch`/`push`; merge epiku do bazy po odbiorze robi człowiek. Bez tej linii pętla nie
+przełącza gałęzi.
 
 ## Odinstalowanie
 

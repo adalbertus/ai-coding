@@ -89,6 +89,10 @@ language, committing to `main` vs a branch/PR, where to put the detail). If `## 
 nothing about commits, default to a message that records: (1) key decisions made, (2) files
 changed, (3) blockers or notes for the next iteration.
 
+If the loop put you on an epic branch (`epik/<number>`), commit there, on the current branch —
+even if the `## Ralph` commit conventions name a different branch — and do not switch branches,
+merge, or push.
+
 # THE ISSUE
 
 First find out whether the issue has a parent (it is then a sub-issue of an epic):

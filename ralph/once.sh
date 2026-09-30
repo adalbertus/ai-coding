@@ -45,6 +45,14 @@ fi
 # exits non-zero, so `|| exit 0` stops the loop cleanly (the message is already on screen).
 "$SCRIPT_DIR/preflight.sh" "$RALPH_RUNTIME" || exit 0
 
+# Optional epic branch (ADR 0012): a `ralph-base-branch: <base>` line in ## Ralph. Absent ->
+# trunk, the loop never switches branches. When set, a dirty tree is refused here already, so
+# no selector tokens are spent on a run that could not switch branches anyway.
+base_branch=$(ralph_contract_section "$(ralph_contract_file "$RALPH_RUNTIME")" | ralph_base_branch) || exit 1
+if [ -n "$base_branch" ]; then
+  ralph_require_clean_tree || exit 1
+fi
+
 # 1. Recent history, for both the selector and the worker.
 commits=$(git log -n 5 --format="%H%n%ad%n%B---" --date=short 2>/dev/null || echo "No commits found")
 
@@ -142,7 +150,24 @@ effort="$RALPH_EFFORT"
 
 echo "Wybrane issue #${num} (complexity:${complexity}) -> $(ralph_model_display "$RALPH_RUNTIME" "$model" "$effort")"
 
-# 4. Stage 2 — implement ONLY the selected issue, on the chosen model.
+# 4. Epic branch: put the repo on epik/<parent> (merging the base in) or on the base for an
+#    issue without a parent. The run ends on that branch, ready for local acceptance.
+if [ -n "$base_branch" ]; then
+  # Loop/epic mode already knows the parent from the annotated list; explicit mode (or a
+  # selector answer outside that list) asks GitHub. A failed lookup stops the run rather than
+  # silently putting sub-issue work on the base.
+  if jq -e --argjson n "$num" 'any(.[]; .number == $n)' <<<"${issues_json:-[]}" >/dev/null 2>&1; then
+    parent=$(jq -r --argjson n "$num" 'first(.[] | select(.number == $n) | .parent) // empty' <<<"$issues_json")
+  elif ! parent=$(ralph_issue_parent "$num"); then
+    echo "Nie udało się ustalić epiku issue #${num} (gh api); nie przełączam gałęzi, nie uruchamiam workera."
+    exit 1
+  fi
+  ralph_prepare_branch "$base_branch" "$parent" || exit 1
+  # The worker should see the history of the branch it will commit to.
+  commits=$(git log -n 5 --format="%H%n%ad%n%B---" --date=short 2>/dev/null || echo "No commits found")
+fi
+
+# 5. Stage 2 — implement ONLY the selected issue, on the chosen model.
 issue=$(gh issue view "$num" --json number,title,body \
   --jq '"## Issue #\(.number): \(.title)\n\n\(.body)\n"' 2>/dev/null)
 prompt=$(ralph_render_prompt "$RALPH_RUNTIME" "$SCRIPT_DIR/prompt.md")
