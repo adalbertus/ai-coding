@@ -364,3 +364,27 @@ ralph_warn_dirty_tree() {
     echo "   Sprawdź (git status) i domknij je, zanim odpalisz kolejny przebieg."
   fi
 }
+
+# --- Epics (ADR 0012). Pure JSON helpers: no gh calls, so they can be unit-tested. ---
+# "epics" JSON is an array of {number, started, open:[sub-issue numbers]}, where `started`
+# means at least one sub-issue is already closed.
+
+# stdin: issues array; $1: epics JSON. Adds `parent` (epic number or null) to every issue.
+ralph_annotate_parents() {
+  jq -c --argjson epics "$1" \
+    'map(. as $i | .parent = (first($epics[] | select(.open | index($i.number)) | .number) // null))'
+}
+
+# stdin: issues array (with `parent`); $1: epics JSON. If a started epic has candidate
+# sub-issues, keep only those of the oldest (lowest number) such epic; otherwise pass through.
+ralph_filter_started_epic() {
+  jq -c --argjson epics "$1" '
+    . as $issues
+    | ([$epics[] | select(.started) | .number as $e | select(any($issues[]; .parent == $e)) | $e] | min) as $pick
+    | if $pick == null then $issues else [$issues[] | select(.parent == $pick)] end'
+}
+
+# stdin: issues array (with `parent`); $1: epic number. Keeps only that epic's sub-issues.
+ralph_epic_issues() {
+  jq -c --argjson epic "$1" '[.[] | select(.parent == $epic)]'
+}

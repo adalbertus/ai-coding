@@ -164,6 +164,7 @@ Pętla bierze **jedno** zadanie, implementuje je, uruchamia feedback loops i com
 ralph-once 224          # domyślnie Claude, wstecznie kompatybilne
 ralph-once claude 224   # jawnie Claude
 ralph-once codex 224    # jawnie Codex
+ralph-once 12           # 12 to epik ([PRD]) → selektor wybiera jedno z jego otwartych sub-issues
 ralph-once              # selektor + worker przez Claude
 ralph-once codex        # selektor + worker przez Codex
 ralph-once-local codex  # lokalne issues/*.md przez Codex
@@ -225,6 +226,11 @@ done-criteria o weryfikacji ręcznej — ta część przechodzi na odbiór epika
 idą komentarzem do epika (brak odchyleń = brak komentarza). Gdy zamknięte zostaje ostatnie
 otwarte sub-issue, worker nakłada `needs-human-test` na epik i komentuje, że jest gotowy do odbioru.
 Issue bez rodzica działa jak wyżej.
+
+Wybór pracy zna epiki: w trybie pętli, jeśli istnieje **rozpoczęty epik** (co najmniej jedno
+zamknięte sub-issue) z otwartymi sub-issues, selektor dostaje tylko sub-issues najstarszego takiego
+epiku (filtr w `lib.sh`, czysta funkcja). `ralph-once <nr epiku>` pracuje nad jego sub-issue;
+epik bez otwartych sub-issues daje komunikat i wyjście bez workera.
 
 ## Odinstalowanie
 
