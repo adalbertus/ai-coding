@@ -39,6 +39,15 @@ expect() {
   fi
 }
 
+# expect_not <desc> <substring> — the last output must NOT contain the substring.
+expect_not() {
+  if printf '%s' "$LAST_OUT" | grep -qF "$2"; then
+    echo "✗ $1 (znaleziono: '$2')"; printf '   out: %s\n' "$LAST_OUT"; fail=$((fail+1))
+  else
+    echo "✓ $1"; pass=$((pass+1))
+  fi
+}
+
 RALPH_SECTION=$'## Ralph\n\nFeedback loops przed commitem: `composer test`, `./vendor/bin/pint`.\nDone: zadanie skończone, gdy testy są zielone.\n'
 
 # 1. Brak CLAUDE.md -> halt, kieruje do /ralph-konfiguracja.
@@ -61,9 +70,22 @@ expect "treść + gate READY -> exit 0" 0
 run "$RALPH_SECTION" "echo MISSING"
 expect "treść + gate MISSING -> halt" 1 "/ralph-konfiguracja"
 
-# 6. ## Ralph z treścią + gate zwraca śmieci/pusto -> fail-closed halt.
+# 6. ## Ralph z treścią + gate zwraca pusto -> fail-closed halt, komunikat o nieudanym uruchomieniu
+#    runtime'u (nie o niekompletnej sekcji).
 run "$RALPH_SECTION" "true"
-expect "treść + gate pusto -> fail-closed halt" 1 "/ralph-konfiguracja"
+expect "treść + gate pusto -> halt: nie udało się uruchomić" 1 "Nie udało się uruchomić"
+expect_not "pusty gate nie twierdzi, że sekcja niekompletna" "niekompletn"
+
+# 6b. Runtime kończy się błędem (nawet jeśli coś wypisał) -> ten sam komunikat.
+run "$RALPH_SECTION" "false"
+expect "gate kończy się błędem -> halt: nie udało się uruchomić" 1 "Nie udało się uruchomić"
+expect_not "gate z błędem nie twierdzi, że sekcja niekompletna" "niekompletn"
+run "$RALPH_SECTION" "bash -c 'echo READY; exit 3'"
+expect "gate z błędem i READY na stdout -> nadal halt" 1 "Nie udało się uruchomić"
+
+# 6c. Śmieci na stdout przy kodzie 0 -> werdykt nie-READY, obecny komunikat o sekcji.
+run "$RALPH_SECTION" "echo cokolwiek"
+expect "gate śmieci (rc 0) -> halt: sekcja niekompletna" 1 "niekompletn"
 
 # 7. Podsekcje ### nie kończą sekcji (treść za ### nadal liczy się jako body) + READY.
 run $'## Ralph\n\n### Feedback\n`npm test`\n\n### Done\ngdy zielone\n' "echo READY"

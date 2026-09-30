@@ -11,7 +11,8 @@
 #
 # The model gate is stubbable for tests via RALPH_GATE_CMD (a command whose stdout is the
 # verdict READY/MISSING); when unset, a headless runtime-selected guard call is used. Any error,
-# empty output or non-READY verdict halts (fail-closed).
+# empty output or non-READY verdict halts (fail-closed); error/empty gets its own message
+# (runtime did not run) distinct from a MISSING verdict (section incomplete).
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")" && pwd)"
@@ -89,11 +90,21 @@ lub to placeholder — wypisz dokładnie MISSING. Wypisz tylko jedno słowo.
 --- sekcja ## Ralph ---
 $section"
 
+gate_rc=0
 if [ -n "${RALPH_GATE_CMD:-}" ]; then
-  verdict=$($RALPH_GATE_CMD 2>/dev/null)
+  verdict=$($RALPH_GATE_CMD 2>/dev/null); gate_rc=$?
 else
   echo "Strażnik ($(ralph_selector_model_label "$runtime")): weryfikuję sekcję ## Ralph... (chwilę trwa)" >&2
-  verdict=$(ralph_run_model_capture "$runtime" guard "$gate_prompt" 2>/dev/null)
+  verdict=$(ralph_run_model_capture "$runtime" guard "$gate_prompt" 2>/dev/null); gate_rc=$?
+fi
+
+# A failed or silent model call says nothing about the section: halt (fail-closed) but blame the
+# runtime, not the section, so the user checks install/login instead of rewriting a fine contract.
+if [ "$gate_rc" != 0 ] || [ -z "$(printf '%s' "$verdict" | tr -d '[:space:]')" ]; then
+  echo "✋ Nie udało się uruchomić runtime'u \"$runtime\" do weryfikacji sekcji \"## Ralph\"." >&2
+  echo "   Wywołanie modelu zakończyło się błędem albo zwróciło pustą odpowiedź — to nie jest ocena sekcji." >&2
+  echo "   Sprawdź, czy $runtime jest zainstalowany i zalogowany, po czym spróbuj ponownie." >&2
+  exit 1
 fi
 
 verdict=$(printf '%s' "$verdict" | grep -Eo 'READY|MISSING' | head -1)
