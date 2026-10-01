@@ -22,7 +22,7 @@ runtime="${1:-${RALPH_RUNTIME:-claude}}"
 contract_file="$(ralph_contract_file "$runtime")"
 
 halt() {
-  echo "✋ $1" >&2
+  ralph_say warn "✋ $1" >&2
   echo "   To repo nie ma gotowej sekcji \"## Ralph\" w $contract_file (instrukcje testowania + done-criteria)." >&2
   case "$runtime" in
     codex)
@@ -67,7 +67,7 @@ if [ -f "$other_file" ] && grep -qE '^#{1,2}[[:space:]]+Ralph([[:space:]]|$)' "$
   if ! diff_out=$(diff -u \
     <(printf '%s\n' "$section" | normalize_section) \
     <(printf '%s\n' "$other_section" | normalize_section) 2>/dev/null); then
-    echo "✋ Sekcje \"## Ralph\" w $contract_file i $other_file się różnią." >&2
+    ralph_say warn "✋ Sekcje \"## Ralph\" w $contract_file i $other_file się różnią." >&2
     echo "   Runtime, którego używasz rzadziej, pracowałby na nieaktualnych regułach" >&2
     echo "   (gałąź commitów, lista dokumentów do doc-sync)." >&2
     echo "   Różnica (-$contract_file / +$other_file):" >&2
@@ -101,7 +101,7 @@ fi
 # A failed or silent model call says nothing about the section: halt (fail-closed) but blame the
 # runtime, not the section, so the user checks install/login instead of rewriting a fine contract.
 if [ "$gate_rc" != 0 ] || [ -z "$(printf '%s' "$verdict" | tr -d '[:space:]')" ]; then
-  echo "✋ Nie udało się uruchomić runtime'u \"$runtime\" do weryfikacji sekcji \"## Ralph\"." >&2
+  ralph_say err "✋ Nie udało się uruchomić runtime'u \"$runtime\" do weryfikacji sekcji \"## Ralph\"." >&2
   echo "   Wywołanie modelu zakończyło się błędem albo zwróciło pustą odpowiedź — to nie jest ocena sekcji." >&2
   echo "   Sprawdź, czy $runtime jest zainstalowany i zalogowany, po czym spróbuj ponownie." >&2
   exit 1

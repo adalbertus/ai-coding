@@ -28,6 +28,7 @@ SCRIPT_DIR="$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")" && pwd)"
 . "$SCRIPT_DIR/lib.sh"
 
 ralph_parse_args ralph-once "$@" || exit "$RALPH_EXIT_ERROR"
+ralph_start_run_log "once${RALPH_ISSUE_ARG:+-$RALPH_ISSUE_ARG}" "$@"
 ralph_require_runtime "$RALPH_RUNTIME" || exit "$RALPH_EXIT_ERROR"
 ISSUE_ARG="$RALPH_ISSUE_ARG"
 
@@ -50,9 +51,9 @@ if [ -z "$ISSUE_ARG" ]; then
     --json number,title --jq '.[] | "  #\(.number): \(.title)"' 2>/dev/null)
 
   if [ -n "$pending" ]; then
-    echo "⏳ Zaimplementowane, czekają na weryfikację przez człowieka (needs-human-test)."
-    echo "   Sprawdź i zamknij, zanim ruszę po nową pracę:"
-    echo "$pending"
+    ralph_say warn "⏳ Zaimplementowane, czekają na weryfikację przez człowieka (needs-human-test).
+   Sprawdź i zamknij, zanim ruszę po nową pracę:
+$pending"
     exit "$RALPH_EXIT_NOTHING"
   fi
 fi
@@ -82,7 +83,7 @@ if [ -n "$ISSUE_ARG" ]; then
   num="$ISSUE_ARG"
   title=$(gh issue view "$num" --json title --jq .title 2>/dev/null) || true
   if [ -z "$title" ]; then
-    echo "Nie znalazłem issue #${num} w tym repo."
+    ralph_say err "Nie znalazłem issue #${num} w tym repo."
     exit "$RALPH_EXIT_ERROR"
   fi
   case "$title" in
@@ -106,7 +107,7 @@ if [ -z "$ISSUE_ARG" ] || [ -n "$EPIC_ARG" ]; then
     open_count=$(jq -r --argjson e "$EPIC_ARG" '[.[] | select(.number == $e) | .open[]] | length' <<<"$epics")
     if [ "${open_count:-0}" = 0 ]; then
       ralph_mark_epic_if_ready "$EPIC_ARG" || true
-      echo "Epic #${EPIC_ARG} nie ma otwartych sub-issues — czeka na odbiór albo jest skończony. Nie uruchamiam workera."
+      ralph_say warn "Epic #${EPIC_ARG} nie ma otwartych sub-issues — czeka na odbiór albo jest skończony. Nie uruchamiam workera."
       exit "$RALPH_EXIT_NOTHING"
     fi
   fi
@@ -130,20 +131,20 @@ if [ -z "$ISSUE_ARG" ] || [ -n "$EPIC_ARG" ]; then
   candidates=$(jq -r 'length' <<<"$issues_json")
   issues_json=$(ralph_filter_unblocked "${open_numbers:-[]}" <<<"$issues_json")
   if [ "$candidates" -gt 0 ] && [ "$(jq -r 'length' <<<"$issues_json")" = 0 ]; then
-    echo "Wszystkie kandydaty są zablokowane (otwarty bloker w sekcji „Blocked by”). Nie wywołuję selektora."
+    ralph_say warn "Wszystkie kandydaty są zablokowane (otwarty bloker w sekcji „Blocked by”). Nie wywołuję selektora."
     exit "$RALPH_EXIT_NOTHING"
   fi
   if [ -n "$EPIC_ARG" ]; then
     issues_json=$(ralph_epic_stage <<<"$issues_json")
     if ! jq -e 'any(.[]; any(.labels[]?; .name == "ready-for-agent"))' <<<"$issues_json" >/dev/null 2>&1 \
         && [ "$(jq -r 'length' <<<"$issues_json")" -gt 0 ]; then
-      echo "Epic #${EPIC_ARG}: nie ma wolnych issues AFK — wybieram sesję HITL."
+      ralph_say warn "Epic #${EPIC_ARG}: nie ma wolnych issues AFK — wybieram sesję HITL."
     fi
   fi
   issues=$(jq -r '.[] | "## Issue #\(.number): \(.title)\n\n\(.body)\n"' <<<"$issues_json")
 
   if [ -z "$issues" ]; then
-    echo "Brak otwartych zadań (ready-for-agent). Nie ma nic do zrobienia."
+    ralph_say warn "Brak otwartych zadań (ready-for-agent). Nie ma nic do zrobienia."
     exit "$RALPH_EXIT_NOTHING"
   fi
 
@@ -166,7 +167,7 @@ if [ -z "$ISSUE_ARG" ] || [ -n "$EPIC_ARG" ]; then
     num=$(printf '%s' "$selection" | grep -Eo 'NO_TASK|[0-9]+' | head -1)
 
     if [ -z "$num" ] || [ "$num" = "NO_TASK" ]; then
-      echo "Selektor nie wskazał żadnego zadania (odpowiedź: '${selection}'). Nie ma nic do zrobienia."
+      ralph_say warn "Selektor nie wskazał żadnego zadania (odpowiedź: '${selection}'). Nie ma nic do zrobienia."
       exit "$RALPH_EXIT_NOTHING"
     fi
 
@@ -199,7 +200,7 @@ if [ -n "$base_branch" ]; then
   if jq -e --argjson n "$num" 'any(.[]; .number == $n)' <<<"${issues_json:-[]}" >/dev/null 2>&1; then
     parent=$(jq -r --argjson n "$num" 'first(.[] | select(.number == $n) | .parent) // empty' <<<"$issues_json")
   elif ! parent=$(ralph_issue_parent "$num"); then
-    echo "Nie udało się ustalić epicu issue #${num} (gh api); nie przełączam gałęzi, nie uruchamiam workera."
+    ralph_say err "Nie udało się ustalić epicu issue #${num} (gh api); nie przełączam gałęzi, nie uruchamiam workera."
     exit "$RALPH_EXIT_ERROR"
   fi
   ralph_prepare_branch "$base_branch" "$parent" || exit "$RALPH_EXIT_ERROR"
@@ -214,7 +215,7 @@ issue=$(gh issue view "$num" --json number,title,body \
 # session with its own prompt. Loop mode only ever selects ready-for-agent issues.
 mode=$(ralph_worker_mode <<<"$labels")
 if [ "$mode" = "hitl" ]; then
-  echo "Issue #${num} nie ma ready-for-agent — to HITL: otwieram sesję interaktywną z człowiekiem."
+  ralph_say warn "Issue #${num} nie ma ready-for-agent — to HITL: otwieram sesję interaktywną z człowiekiem."
   [ -n "${RALPH_NOTIFY_HITL:-}" ] && ralph_notify "Ralph: sesja HITL" "Issue #${num} czeka na Ciebie."
   prompt=$(ralph_render_prompt "$RALPH_RUNTIME" "$SCRIPT_DIR/prompt-hitl.md")
 else
@@ -242,4 +243,6 @@ ralph_warn_dirty_tree
 # The result of the run is the state of the issue afterwards, not the worker's own exit status.
 state=$(gh issue view "$num" --json state --jq '.state | ascii_downcase' 2>/dev/null)
 has_label=$(gh issue view "$num" --json labels --jq 'any(.labels[]; .name == "ready-for-agent")' 2>/dev/null)
-exit "$(ralph_run_outcome "$mode" "$state" "$has_label")"
+outcome=$(ralph_run_outcome "$mode" "$state" "$has_label")
+ralph_outcome_message "$outcome" "$num"
+exit "$outcome"

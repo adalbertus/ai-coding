@@ -31,7 +31,10 @@ i **idempotentny** (ponowne uruchomienie nie psuje poprawnych symlinków). Tworz
 - skille Claude → `~/.claude/skills`: `ralph-konfiguracja`, `to-issues-ralph`
 - skille Codex → `${CODEX_HOME:-~/.codex}/skills`: te same nazwy, wołane w Codexie jako `$...`
 - launchery → `~/.local/bin`: `ralph-once`, `ralph-once-local`, `ralph-epic`
-- repo-local plugin Codex → `.agents/plugins/marketplace.json` + `.agents/plugins/plugins/ai-coding`
+
+Repo-local plugin Codex (`.agents/plugins/marketplace.json` + `.agents/plugins/plugins/ai-coding`)
+jest częścią repo, instalator go nie tworzy — tylko wypisuje dwie komendy `codex plugin`, którymi
+go włączasz.
 
 Źródło zostaje w tym repo, a katalogi skills i `~/.local/bin` tylko linkują — `realpath` rozwija
 symlink, więc skrypty Ralpha znajdują swoje prompty obok siebie. Repo projektowe **nie** zawiera
@@ -192,7 +195,8 @@ Dwa flavoury, jeden zestaw promptów:
 `complexity:*`: każde issue jedzie na wskazanym modelu z effort high, także sesja HITL. Flaga może
 stać w dowolnym miejscu. Strażnik i selektor zostają na Haiku. Z Codeksem run odmawia startu.
 
-Oba zaczynają od **strażnika** (`ralph/preflight.sh`, fail-closed): repo musi mieć gotową sekcję
+Przed wyborem zadania i workerem oba przechodzą przez **strażnika** (`ralph/preflight.sh`,
+fail-closed; w `ralph-once` po locku i bramce `needs-human-test`): repo musi mieć gotową sekcję
 `## Ralph` w natywnym pliku runtime'u (`CLAUDE.md` dla Claude, `AGENTS.md` dla Codex), inaczej
 pętla halt-uje z instrukcją konfiguracji. Gdy repo ma oba pliki i oba deklarują `## Ralph`,
 strażnik dodatkowo pilnuje, żeby te sekcje były **identyczne** — rozjazd oznacza, że rzadziej
@@ -200,12 +204,38 @@ używany runtime pracuje na nieaktualnych regułach (np. commituje na inną gał
 z diffem i kieruje do `/ralph-konfiguracja`.
 
 Claude jedzie **bez nadzoru**: `claude -p` w **auto mode** (`--permission-mode auto`) ze
-strumieniowym wyjściem JSON. Worker kończy się sam po domknięciu issue. Na ekranie widać jedną
-krótką linię na krok (`▸ Bash: bash test.sh`, `▸ Edit: greet.sh`) i na końcu podsumowanie modelu.
+strumieniowym wyjściem JSON. Worker kończy się sam po domknięciu issue.
 Codex też jedzie **bez nadzoru**: `codex exec --json --approve-for-me` (eskalacje sandboxa idą
-przez automatyczny review; flaga jest w `codex exec` od wersji 0.159). Na ekranie ta sama jedna
-linia na krok (`▸ Bash: …`, `▸ Edit: …`, `▸ Write: …`) i podsumowanie modelu. W obu runtime'ach
+przez automatyczny review; flaga jest w `codex exec` od wersji 0.159). W obu runtime'ach
 celem jest AFK bez `dangerously-bypass-*`.
+
+**Co widać na ekranie.** Strumień z workera przechodzi przez renderer (`lib.sh`), taki sam dla
+obu runtime'ów:
+
+- `› …` — **narracja**: tekst, który model pisze między krokami („Czytam routing…”, „Bramka
+  zielona, commituję”). To główna treść ekranu.
+- `  ▸ Bash: …`, `  ▸ Edit: …` — kroki, przyciemnione, jedna linia ucięta do szerokości
+  terminala (`…`). Pełna komenda jest w zapisie runu.
+- `  ✗ …` (czerwone) — krok odrzucony przez CLI (np. zablokowany `sleep`, brak narzędzia) albo
+  komenda Codexa z niezerowym kodem. Komenda Claude zakończona błędem często nie jest widoczna
+  jako błąd, bo model dokleja `| tail` i kod wyjścia jest z `tail` — o wyniku bramki mówi narracja
+  i werdykt iteracji.
+- Praca w tle (tylko Claude): `⧗` komenda przeniesiona w tle (przekroczony limit czasu Basha)
+  albo uruchomiona w tle, `… Czekam na zadania w tle (N)` gdy tura skończyła się przed nimi,
+  `↻` gdy zadanie się skończyło i CLI obudziło workera. Nikt tu nie odpytuje: `claude -p` nie
+  kończy się, dopóki działa zadanie w tle, i sam wznawia model po jego zakończeniu.
+- `⚠ Limit użycia blisko` (pomarańczowe) i `✗ Limit użycia wyczerpany` (czerwone).
+- Na końcu `── Raport workera ──` z podsumowaniem modelu, wypisany raz. Przy pracy w tle
+  `claude -p` daje kilka wyników (jeden na turę, także odpowiedź na wygasły monitor); raportem
+  jest ostatnia tura, w której worker coś robił. Sesja przerwana przez API (np. limit sesji) to
+  czerwone `── Worker przerwany ──`.
+
+Po runie skrypt wypisuje werdykt: zielone `✓ Issue #N zamknięte.`, czerwone `✗ … nie zostało
+domknięte`, pomarańczowe `⚠`, gdy issue czeka na człowieka (odkryty HITL, nierozwiązana sesja
+HITL). Tak samo kolorowane są komunikaty skryptów: czerwone błędy i odmowy, pomarańczowe stopy
+czekające na Twoją decyzję (strażnik `✋`, bramka `needs-human-test`, brak wolnych zadań, limit
+iteracji), zielone sukcesy (epic do odbioru). Kolory są tylko na terminalu; `NO_COLOR` je
+wyłącza, a w przekierowaniu do pliku ich nie ma.
 
 **Sesja HITL.** Tryb workera wynika z issue, nie z komendy. Issue z labelką `ready-for-agent`
 idzie bez nadzoru (jak wyżej); issue bez niej to HITL i `ralph-once <nr>` otwiera dla niego
@@ -221,11 +251,22 @@ dokładnie trzeba (z rekomendacją), i kończy run. Issue nie wraca do pętli sa
 rozstrzygnięta, oddajesz je pętli, przywracając labelkę
 (`gh issue edit <nr> --add-label ready-for-agent`).
 
-**Zapis runu (Claude i Codex).** Pełny strumień JSON ląduje w `.git/ralph-logs/` (plik
-`<data>-<godzina>-issue-<nr>.jsonl`, dla `ralph-once-local` `…-local.jsonl`). Katalog powstaje
-przy pierwszym runie i leży poza drzewem roboczym, więc nie zmienia `git status`. Na końcu skrypt
-wypisuje `claude --resume <id>` (Codex: `codex resume <id>`) — tą komendą wchodzisz do sesji workera, żeby zobaczyć, co
-zrobił, albo go dopytać. Codex pisze błędy narzędzi tylko na stderr, więc obok JSONL leży
+**Logi (Claude i Codex).** Wszystko ląduje w `.git/ralph-logs/`. Katalog powstaje przy
+pierwszym runie i leży poza drzewem roboczym, więc nie zmienia `git status`. Dwa rodzaje plików:
+
+- **Log przebiegu** — `<data>-<godzina>-epic[-<nr>].log` (`ralph-epic`), `…-once[-<nr>].log`
+  (`ralph-once`), `…-local-run.log` (`ralph-once-local`). Wszystko, co było na ekranie (decyzje
+  strażnika i selektora, gałąź, narracja i kroki workera, werdykty, komunikaty stopu), bez kolorów, z linią startu
+  (komenda, katalog, gałąź) i końca (kod wyjścia). Jeden plik na wywołanie: `ralph-once`
+  uruchomiony przez `ralph-epic` pisze do logu epicu. Ścieżkę skrypt wypisuje na końcu
+  (`Log przebiegu: …`). Sesja HITL idzie na terminal i do logu nie trafia.
+- **Zapis runu** — `<data>-<godzina>-issue-<nr>.jsonl` (dla `ralph-once-local` `…-local.jsonl`):
+  pełny strumień JSON jednego workera. Jego ścieżka jest w logu przebiegu.
+
+Gdy coś się popsuło, w innej sesji wystarczy „zobacz logi w `.git/ralph-logs/`”: log przebiegu
+mówi, co zdecydował skrypt i na czym stanął, zapis runu — co dokładnie robił worker. Na końcu
+runu skrypt wypisuje też `claude --resume <id>` (Codex: `codex resume <id>`) — tą komendą wchodzisz
+do sesji workera, żeby zobaczyć, co zrobił, albo go dopytać. Codex pisze błędy narzędzi tylko na stderr, więc obok JSONL leży
 `…-issue-<nr>.stderr.log`, a gdy są w nim linie `ERROR`, skrypt wypisuje ścieżkę i pierwsze z nich. Ostrzeżenie o brudnym drzewie po runie działa jak wcześniej.
 
 ### Lock worktree
@@ -336,7 +377,7 @@ powiadomień).
 | Stop | Komunikat | Co robisz |
 |------|-----------|-----------|
 | epic w odbiorze (kod 0) | „Epic #N gotowy do odbioru” | przechodzisz `## Jak odebrać`, mówisz „zamykaj” albo zgłaszasz uwagi |
-| AFK nie domknęło issue (3) | numer issue i wskazanie komentarza workera | czytasz komentarz i log w `.git/ralph-logs/`, poprawiasz przyczynę (albo issue) i uruchamiasz ponownie; pętla nie pomija issue |
+| AFK nie domknęło issue (3) | numer issue i wskazanie komentarza workera | czytasz komentarz i logi w `.git/ralph-logs/`, poprawiasz przyczynę (albo issue) i uruchamiasz ponownie; pętla nie pomija issue |
 | HITL nierozwiązane (5) | numer issue | rozstrzygasz: domykasz albo przywracasz `ready-for-agent`, uruchamiasz ponownie |
 | nic do zrobienia (2) | lista otwartych sub-issues (HITL oznaczone) | odblokuj je, dodaj decyzję lub `ready-for-agent`, uruchom ponownie |
 | błąd lub odmowa (1) | przyczyna z komunikatów `ralph-once` | naprawiasz (brudne drzewo, konflikt scalania, lock, strażnik) i uruchamiasz ponownie |

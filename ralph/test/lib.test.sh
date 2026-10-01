@@ -3,6 +3,9 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")" && pwd)"
+# Plain, unclipped output whatever terminal the tests run in; colour and clipping are tested
+# explicitly.
+export RALPH_COLOR=0 RALPH_COLS=0
 . "$SCRIPT_DIR/../lib.sh"
 
 pass=0; fail=0
@@ -227,11 +230,99 @@ not json at all
 {"type":"result","subtype":"success","result":"Gotowe: issue zamknięte.","session_id":"sess-123"}
 STREAM
 )
-expect_eq "renderer: Bash call, Edit/Write paths, final result; unknown/garbage skipped" \
+expect_eq "renderer: narration, Bash call, Edit/Write paths, final result; unknown/garbage skipped" \
   "$(ralph_render_stream <<<"$stream_fixture")" \
-  $'▸ Bash: bash test.sh\n▸ Edit: greet.sh\n▸ Write: /elsewhere/x.md\n\n── Raport workera ──\nGotowe: issue zamknięte.'
-expect_eq "renderer: unknown-only stream renders nothing" \
-  "$(ralph_render_stream <<<'{"type":"system","subtype":"init"}')" ""
+  $'› Zaczynam.\n  ▸ Bash: bash test.sh\n  ▸ Edit: greet.sh\n  ▸ Write: /elsewhere/x.md\n\n── Raport workera ──\nGotowe: issue zamknięte.'
+expect_eq "renderer: a stream without a result says so" \
+  "$(ralph_render_stream <<<'{"type":"system","subtype":"init"}')" \
+  $'\n── Worker zakończył się bez raportu ──'
+
+# Background work: a command moved to the background after the time limit, the turn ending while
+# it runs (first line of the text + waiting), the CLI waking the worker when it is done, a
+# stopped monitor. A foreground task's notification is not shown. The report is the last turn
+# that did work, not the reply to a stale wake-up.
+bg_fixture=$(cat <<'STREAM'
+{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"composer test"}}]}}
+{"type":"system","subtype":"task_started","task_id":"t1","description":"composer test","is_backgrounded":false}
+{"type":"system","subtype":"task_updated","task_id":"t1","patch":{"is_backgrounded":true}}
+{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"t1"}]}
+{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Monitor","input":{"command":"until …","description":"Czekaj na testy"}}]}}
+{"type":"system","subtype":"task_started","task_id":"m1","description":"Czekaj na testy","is_backgrounded":true}
+{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"t1"},{"task_id":"m1"}]}
+{"type":"assistant","message":{"content":[{"type":"text","text":"Testy w tle.\nDrugi akapit."}]}}
+{"type":"result","subtype":"success","is_error":false,"num_turns":3,"result":"Testy w tle.\nDrugi akapit."}
+{"type":"system","subtype":"task_notification","task_id":"t1","status":"completed"}
+{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"m1"}]}
+{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"git commit -m x"}}]}}
+{"type":"assistant","message":{"content":[{"type":"text","text":"Zamknięte."}]}}
+{"type":"result","subtype":"success","is_error":false,"num_turns":2,"result":"Zamknięte."}
+{"type":"system","subtype":"task_notification","task_id":"m1","status":"stopped"}
+{"type":"system","subtype":"background_tasks_changed","tasks":[]}
+{"type":"system","subtype":"task_started","task_id":"f1","description":"krótka","is_backgrounded":false}
+{"type":"system","subtype":"task_notification","task_id":"f1","status":"completed"}
+{"type":"assistant","message":{"content":[{"type":"text","text":"Monitor wygasł, nic nie zmienia."}]}}
+{"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":"Monitor wygasł, nic nie zmienia."}
+STREAM
+)
+expect_eq "renderer: background work is spelled out; report = last turn that did work" \
+  "$(ralph_render_stream <<<"$bg_fixture")" \
+  "$(cat <<'WANT'
+  ▸ Bash: composer test
+  ⧗ Przeniesione w tle (przekroczony limit czasu komendy): composer test
+  ▸ Monitor: Czekaj na testy
+  ⧗ W tle: Czekaj na testy
+› Testy w tle.
+  … Czekam na zadania w tle (2); CLI wznowi workera, gdy się skończą.
+  ↻ Zadanie w tle zakończone: composer test
+  ▸ Bash: git commit -m x
+› Zamknięte.
+  … Czekam na zadania w tle (1); CLI wznowi workera, gdy się skończą.
+  ↻ Zadanie w tle przerwane (stopped): Czekaj na testy
+
+── Raport workera ──
+Zamknięte.
+WANT
+)"
+
+# Failures: a rejected tool call, a usage-limit warning then exhaustion (one line per change of
+# status, not per event), and a last result with is_error printed as an interruption.
+err_fixture=$(cat <<'STREAM'
+{"type":"assistant","message":{"content":[{"type":"text","text":"  Sprawdzam.\nDruga linia.  "},{"type":"tool_use","name":"Grep","input":{"pattern":"foo"}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","is_error":true,"content":"<tool_use_error>Error: No such tool available: Grep.\nmore</tool_use_error>"}]}}
+{"type":"rate_limit_event","rate_limit_info":{"status":"allowed"}}
+{"type":"rate_limit_event","rate_limit_info":{"status":"allowed_warning","rateLimitType":"five_hour","utilization":0.9}}
+{"type":"rate_limit_event","rate_limit_info":{"status":"allowed_warning","rateLimitType":"five_hour","utilization":0.91}}
+{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","rateLimitType":"five_hour"}}
+{"type":"result","subtype":"success","is_error":true,"num_turns":2,"result":"You've hit your session limit"}
+STREAM
+)
+expect_eq "renderer: rejected tool call, limit status changes, interrupted worker" \
+  "$(ralph_render_stream <<<"$err_fixture")" \
+  "$(cat <<'WANT'
+› Sprawdzam.
+  Druga linia.
+  ▸ Grep: foo
+  ✗ Error: No such tool available: Grep.
+  ⚠ Limit użycia blisko (five_hour: 90%)
+  ✗ Limit użycia wyczerpany (five_hour)
+
+── Worker przerwany ──
+You've hit your session limit
+WANT
+)"
+
+clip_fixture='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"echo 0123456789abcdefghij"}}]}}'
+expect_eq "renderer: steps clipped to RALPH_COLS" \
+  "$(RALPH_COLS=20 ralph_render_stream <<<"$clip_fixture" | head -1)" "  ▸ Bash: echo 0123…"
+colored=$(RALPH_COLOR=1 ralph_render_stream <<<"$err_fixture")
+case "$colored" in *$'\e[2m  ▸ Grep: foo\e[0m'*) r=yes ;; *) r=no ;; esac
+expect_eq "renderer: colour on -> steps dimmed" "$r" "yes"
+case "$colored" in *$'\e[31m  ✗ Error: No such tool'*) r=yes ;; *) r=no ;; esac
+expect_eq "renderer: colour on -> rejected tool call red" "$r" "yes"
+case "$colored" in *$'\e[38;5;208m  ⚠ Limit'*) r=yes ;; *) r=no ;; esac
+expect_eq "renderer: colour on -> limit warning orange" "$r" "yes"
+case "$(ralph_render_stream <<<"$err_fixture")" in *$'\e'*) r=yes ;; *) r=no ;; esac
+expect_eq "renderer: colour off -> no escape codes" "$r" "no"
 
 fake_claude_dir=$(mktemp -d)
 mkdir "$fake_claude_dir/bin"
@@ -283,9 +374,9 @@ not json at all
 {"type":"turn.completed","usage":{"input_tokens":1}}
 STREAM
 )
-expect_eq "codex renderer: command, failed command, file changes, final message; unknown/garbage skipped" \
+expect_eq "codex renderer: narration, command, failed command, file changes, final message; unknown/garbage skipped" \
   "$(ralph_render_codex_stream <<<"$codex_fixture")" \
-  $'▸ Bash: bash test.sh\n▸ Bash: false ✗ exit 1\n▸ Edit: greet.sh\n▸ Write: /elsewhere/x.md\n\n── Raport workera ──\nGotowe: issue zamknięte.'
+  $'› Zaczynam.\n  ▸ Bash: bash test.sh\n  ✗ Bash (exit 1): false\n  ▸ Edit: greet.sh\n  ▸ Write: /elsewhere/x.md\n\n── Raport workera ──\nGotowe: issue zamknięte.'
 expect_eq "codex renderer: unknown-only stream renders nothing" \
   "$(ralph_render_codex_stream <<<'{"type":"thread.started","thread_id":"t"}')" ""
 
@@ -433,6 +524,28 @@ expect_eq "outcome: afk open, label removed -> 4" "$(ralph_run_outcome afk open 
 expect_eq "outcome: hitl open, no label -> 5" "$(ralph_run_outcome hitl open false)" "5"
 expect_eq "outcome: hitl open, label restored -> 6" "$(ralph_run_outcome hitl open true)" "6"
 expect_eq "outcome: unreadable state -> 1" "$(ralph_run_outcome afk '' false)" "1"
+
+# --- Colour and verdict lines ---
+expect_eq "say: colour off -> plain text" "$(ralph_say err "błąd")" "błąd"
+expect_eq "say: ok green" "$(RALPH_COLOR=1 ralph_say ok "x" | cat -v)" "^[[32mx^[[0m"
+expect_eq "say: warn orange" "$(RALPH_COLOR=1 ralph_say warn "x" | cat -v)" "^[[38;5;208mx^[[0m"
+expect_eq "say: err red" "$(RALPH_COLOR=1 ralph_say err "x" | cat -v)" "^[[31mx^[[0m"
+expect_eq "say: unknown tone -> plain" "$(RALPH_COLOR=1 ralph_say foo "x")" "x"
+expect_eq "colour init: inherited RALPH_COLOR wins" "$(RALPH_COLOR=1 bash -c '. "$0"; echo $RALPH_COLOR' "$SCRIPT_DIR/../lib.sh" | cat)" "1"
+expect_eq "colour init: stdout not a TTY -> off" "$(env -u RALPH_COLOR bash -c '. "$0"; echo $RALPH_COLOR' "$SCRIPT_DIR/../lib.sh" | cat)" "0"
+expect_eq "term cols: RALPH_COLS wins" "$(RALPH_COLS=77 ralph_term_cols)" "77"
+expect_eq "term cols: garbage -> 0 (no clipping)" "$(RALPH_COLS=abc ralph_term_cols)" "0"
+expect_eq "verdict: closed" "$(ralph_outcome_message 0 7)" "✓ Issue #7 zamknięte."
+expect_eq "verdict: AFK failed" "$(ralph_outcome_message 3 7)" "✗ Issue #7 nie zostało domknięte (nadal ma ready-for-agent)."
+expect_eq "verdict: discovered HITL" "$(ralph_outcome_message 4 7)" "⚠ Issue #7 wymaga człowieka: worker zdjął ready-for-agent (odkryty HITL)."
+expect_eq "verdict: HITL unresolved" "$(ralph_outcome_message 5 7)" "⚠ Sesja HITL skończona, issue #7 nadal otwarte bez ready-for-agent."
+expect_eq "verdict: HITL handed back" "$(ralph_outcome_message 6 7)" "✓ Issue #7 oddane pętli (przywrócone ready-for-agent)."
+expect_eq "verdict: unreadable state" "$(ralph_outcome_message 1 7)" "✗ Nie udało się odczytać stanu issue #7 po runie."
+case "$(RALPH_COLOR=1 ralph_outcome_message 0 7)$(RALPH_COLOR=1 ralph_outcome_message 3 7)$(RALPH_COLOR=1 ralph_outcome_message 4 7)" in
+  $'\e[32m✓'*$'\e[31m✗'*$'\e[38;5;208m⚠'*) r=yes ;;
+  *) r=no ;;
+esac
+expect_eq "verdict: green done, red failure, orange waiting for a human" "$r" "yes"
 expect_eq "outcome: codes are distinct" \
   "$(printf '%s\n' "$RALPH_EXIT_DONE" "$RALPH_EXIT_ERROR" "$RALPH_EXIT_NOTHING" "$RALPH_EXIT_AFK_FAILED" "$RALPH_EXIT_DISCOVERED" "$RALPH_EXIT_HITL_OPEN" "$RALPH_EXIT_HITL_TO_AFK" | sort -u | wc -l | tr -d ' ')" "7"
 

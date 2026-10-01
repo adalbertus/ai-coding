@@ -169,7 +169,8 @@ _Avoid_: using "manual test" for both; treating odbiór as a gap an e2e suite wi
 
 **AFK / HITL**:
 AFK = a task fit to run unsupervised (label `ready-for-agent`); HITL = one needing a human
-decision or a human action (won't carry the label). The selektor and worker only touch AFK tasks.
+decision or a human action (won't carry the label). The selektor only picks AFK tasks; the worker
+runs AFK tasks unattended and HITL tasks as a **sesja HITL**.
 A task planned as AFK that the worker finds needs a human becomes HITL: the worker drops the label
 and says in the thread what is needed; the human restores the label once it is resolved.
 
@@ -203,6 +204,31 @@ The worker run for a HITL task: interactive, because a human is present by defin
 by stating what decision or action is needed, with a recommendation, then implements and closes
 the task like any other. An AFK task runs unattended and ends on its own; which of the two a run
 is follows from the task, not from the command that started it.
+
+**Narracja workera** (worker narration):
+What the model writes in prose between steps of an unattended run ("Bramka zielona, commituję"),
+shown on screen as `› …`. It is the main content of the screen. Tool calls are dimmed one-line
+steps underneath. Zob. `docs/adr/0014`.
+_Avoid_: calling the tool-call lines "narration" or "log".
+
+**Raport workera** (worker report):
+The model's closing summary of one run, printed once at the end of the stream. `claude -p` emits
+a result per turn, including turns woken by finished background tasks, so the report is the last
+turn that did work, not simply the last result.
+_Avoid_: calling an interim result (one emitted while background tasks still run) a report.
+
+**Zapis runu** (run record):
+The full JSON stream of ONE worker run: `.git/ralph-logs/<stamp>-issue-<n>.jsonl`. It shows
+what the worker did, step by step.
+_Avoid_: confusing it with the **log przebiegu**; using the runtime's own session transcript as
+its substitute.
+
+**Log przebiegu** (run log):
+Everything one `ralph-epic` / `ralph-once` / `ralph-once-local` invocation printed, colour
+stripped, framed by start and end lines (with the exit code): `.git/ralph-logs/<stamp>-epic-<n>.log`
+and similar. It shows what the script decided and why it stopped, and it holds the paths of the
+**zapisy runu**. One per invocation: `ralph-once` under `ralph-epic` writes into the epic's log.
+_Avoid_: "log" alone when it is unclear which of the two files is meant.
 
 ## Sesja deliberacyjna (`/sesja`)
 

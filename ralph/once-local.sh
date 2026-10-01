@@ -6,6 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")" && pwd)"
 . "$SCRIPT_DIR/lib.sh"
 
 ralph_parse_args ralph-once-local "$@" || exit 1
+ralph_start_run_log local-run "$@"
 ralph_require_runtime "$RALPH_RUNTIME" || exit 1
 
 ralph_acquire_lock local || exit 0

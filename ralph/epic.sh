@@ -14,15 +14,21 @@ SCRIPT_DIR="$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")" && pwd)"
 . "$SCRIPT_DIR/lib.sh"
 
 ralph_parse_args ralph-epic "$@" || exit "$RALPH_EXIT_ERROR"
+ralph_start_run_log "epic${RALPH_ISSUE_ARG:+-$RALPH_ISSUE_ARG}" "$@"
 runtime="$RALPH_RUNTIME"
 epic="$RALPH_ISSUE_ARG"
 once_cmd="${RALPH_ONCE_CMD:-$SCRIPT_DIR/once.sh}"
 
-# Print a stop message and notify.
+# Print a stop message, coloured by the exit code (green ready, red failure, orange anything
+# that waits for a human), and notify.
 finish() {
-  local code="$1" title="$2" body="$3"
+  local code="$1" title="$2" body="$3" tone=warn
+  case "$code" in
+    "$RALPH_EXIT_DONE") tone=ok ;;
+    "$RALPH_EXIT_ERROR"|"$RALPH_EXIT_AFK_FAILED") tone=err ;;
+  esac
   echo
-  echo "$body"
+  ralph_say "$tone" "$body"
   ralph_notify "$title" "$(printf '%s' "$body" | head -1)"
   exit "$code"
 }
@@ -64,7 +70,7 @@ while :; do
   runs=$((runs + 1))
   : > "$issue_file"
   echo
-  echo "── ralph-epic: iteracja ${runs}/${limit} ──"
+  ralph_say dim "── ralph-epic: iteracja ${runs}/${limit} ──"
   RALPH_ISSUE_FILE="$issue_file" RALPH_NOTIFY_HITL=1 "$once_cmd" "$runtime" "$epic" \
     ${RALPH_FORCE_MODEL:+"--force-model=$RALPH_FORCE_MODEL"}
   code=$?
@@ -78,7 +84,7 @@ while :; do
       finish "$RALPH_EXIT_DONE" "Ralph: epic #${epic} gotowy" "Epic #${epic} gotowy do odbioru." ;;
     stop-afk-failed)
       finish "$RALPH_EXIT_AFK_FAILED" "Ralph: porażka AFK" \
-"Issue #${issue:-?} (epic #${epic}) nie zostało domknięte i nadal ma ready-for-agent — porażka, bez pomijania. Zobacz komentarz workera w tym issue (gh issue view ${issue:-?} --comments) i log w .git/ralph-logs/." ;;
+"Issue #${issue:-?} (epic #${epic}) nie zostało domknięte i nadal ma ready-for-agent — porażka, bez pomijania. Zobacz komentarz workera w tym issue (gh issue view ${issue:-?} --comments) i logi w .git/ralph-logs/." ;;
     stop-hitl)
       finish "$RALPH_EXIT_HITL_OPEN" "Ralph: HITL nierozwiązane" \
 "Sesja HITL dla issue #${issue:-?} (epic #${epic}) skończyła się bez rozwiązania. Rozstrzygnij je (domknij albo przywróć ready-for-agent) i uruchom ralph-epic ponownie." ;;

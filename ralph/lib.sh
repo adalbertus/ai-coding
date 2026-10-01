@@ -176,6 +176,70 @@ ralph_render_prompt() {
   printf '%s\n' "$content"
 }
 
+# --- Screen and run log ---
+
+# Colour is for a human at a terminal: on when stdout is a TTY and NO_COLOR is unset. An
+# inherited RALPH_COLOR wins, so a script whose stdout became the run-log pipe (see
+# ralph_start_run_log) keeps the decision its parent made at the terminal.
+ralph_color_init() {
+  if [ -z "${RALPH_COLOR:-}" ]; then
+    if [ -z "${NO_COLOR:-}" ] && [ -t 1 ]; then RALPH_COLOR=1; else RALPH_COLOR=0; fi
+  fi
+  export RALPH_COLOR
+}
+
+# $1: tone — ok (green), warn (orange), err (red), dim; the rest: the message (may span lines).
+# Plain text when colour is off.
+ralph_say() {
+  local tone="$1" code=""
+  shift
+  case "$tone" in
+    ok) code=32 ;;
+    warn) code='38;5;208' ;;
+    err) code=31 ;;
+    dim) code=2 ;;
+  esac
+  if [ "${RALPH_COLOR:-0}" = 1 ] && [ -n "$code" ]; then
+    printf '\033[%sm%s\033[0m\n' "$code" "$*"
+  else
+    printf '%s\n' "$*"
+  fi
+}
+
+# Width to clip renderer steps to: RALPH_COLS when set, else the controlling terminal's (stdout
+# may be a pipe), else 0 = do not clip.
+ralph_term_cols() {
+  local cols="${RALPH_COLS:-}"
+  [ -n "$cols" ] || cols=$({ stty size </dev/tty; } 2>/dev/null | cut -d' ' -f2)
+  case "$cols" in ''|*[!0-9]*) cols=0 ;; esac
+  echo "$cols"
+}
+
+# Re-runs the calling script ($0, with the arguments after $1) with stdout+stderr teed to
+# <git dir>/ralph-logs/<stamp>-$1.log, then exits with its code. The log is for diagnosis after
+# the fact, e.g. by an agent in another session: what Ralph decided, with the paths of the
+# workers' stream logs, colour stripped, framed by start/end lines with the exit code.
+# Returns without doing anything when a log is already being written (a nested script such as
+# once.sh under ralph-epic; RALPH_RUN_LOG=off in tests) or outside a git repo.
+# Interactive sessions need the terminal, not the pipe: fds 3/4 keep it (RALPH_TERM_FDS=1).
+ralph_start_run_log() {
+  local label="$1" dir log rc
+  shift
+  [ -z "${RALPH_RUN_LOG:-}" ] || return 0
+  { dir=$(git rev-parse --git-path ralph-logs 2>/dev/null) && mkdir -p "$dir"; } 2>/dev/null || return 0
+  ralph_color_init
+  log="$dir/$(date +%Y%m%d-%H%M%S)-${label}.log"
+  printf '# %s %s\n# start: %s, katalog: %s, gałąź: %s\n' "$(basename "$0")" "$*" \
+    "$(date '+%Y-%m-%d %H:%M:%S')" "$PWD" "$(git branch --show-current 2>/dev/null)" > "$log"
+  export RALPH_RUN_LOG="$log" RALPH_TERM_FDS=1
+  # tee (not a line-based filter) so a prompt without a newline still reaches the screen.
+  { "$BASH" "$0" "$@" 2>&1 | tee -a "$log"; rc=${PIPESTATUS[0]}; } 3>&1 4>&2
+  sed $'s/\x1b\\[[0-9;]*m//g' "$log" > "$log.tmp" && mv "$log.tmp" "$log"
+  printf '# koniec: %s, kod wyjścia: %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$rc" >> "$log"
+  ralph_say dim "Log przebiegu: $log"
+  exit "$rc"
+}
+
 ralph_require_runtime() {
   local runtime="$1"
   case "$runtime" in
@@ -257,22 +321,106 @@ ralph_run_model_capture() {
   esac
 }
 
-# stdin: Claude `stream-json` lines -> stdout: one short human line per step. A pure filter:
-# tool calls become `▸ Tool: detail`, the final result is printed as the model's summary,
-# everything else (init, thinking, text, tool results, unparseable lines) is skipped.
+# jq definitions shared by both stream renderers. Expect $color ("1" = ANSI on), $w (terminal
+# width, 0 = do not clip) and $cwd (stripped from paths).
+RALPH_RENDER_JQ_DEFS='
+  def clip: if $w > 0 and length > $w then .[0:$w - 1] + "…" else . end;
+  def paint($code): if $color == "1" then "\u001b[" + $code + "m" + . + "\u001b[0m" else . end;
+  def line1: tostring | (split("\n")[0] // "") | ltrimstr($cwd);
+  def step: ("  " + .) | clip | paint("2");
+  def bad: ("  " + .) | clip | paint("31");
+  def warn: ("  " + .) | clip | paint("38;5;208");
+  def narr: "› " + (tostring | gsub("^\\s+|\\s+$"; "") | gsub("\n"; "\n  "));
+'
+
+# stdin: Claude `stream-json` lines -> stdout: what the worker is doing, for a human. A pure
+# filter. The model's own text is the narration (`› …`); tool calls are dimmed one-line steps
+# (`▸ Tool: detail`, clipped to the terminal width); a tool call the CLI rejected is a red `✗`.
+# Background work is spelled out: a task started or moved to the background (`⧗`), waiting for it
+# at the end of a turn (`…`), its completion waking the worker (`↻`). Usage-limit warnings are
+# orange. `claude -p` emits one `result` per turn and wakes up for every finished background task,
+# so the report is printed once, at the end of the stream: the last turn that did work
+# (num_turns > 1) — a reply to a stale notification is not the report. A last result with
+# is_error (e.g. session limit) is printed red as an interruption instead.
 ralph_render_stream() {
-  jq -R --unbuffered -r --arg cwd "$PWD/" '
-    (fromjson? // empty)
-    | if .type == "assistant" then
-        (.message.content // [])[]?
-        | select(.type == "tool_use")
-        | (.input // {}) as $i
-        | ((($i.command // $i.file_path // $i.notebook_path // $i.pattern // $i.path // $i.url // $i.description // "")
-            | tostring | split("\n")[0] | ltrimstr($cwd)) as $d
-          | "▸ \(.name)" + (if $d == "" then "" else ": \($d)" end))
-      elif .type == "result" and (.result | type) == "string" and .result != "" then
-        "\n── Raport workera ──\n" + .result
-      else empty end'
+  { cat; printf '%s\n' '{"type":"ralph_eof"}'; } |
+  jq -n -R --unbuffered -r --arg cwd "$PWD/" --arg color "${RALPH_COLOR:-0}" \
+    --argjson w "$(ralph_term_cols)" "$RALPH_RENDER_JQ_DEFS"'
+    def flush: if .text then .out += [.text | narr] | .text = null else . end;
+    def task($id): .tasks[$id] // "";
+    def until_time: if (.resetsAt // null) != null then ", reset " + (.resetsAt | strflocaltime("%H:%M")) else "" end;
+    def report:
+      (.results | last) as $last
+      | if $last == null then
+          "\n" + ("── Worker zakończył się bez raportu ──" | paint("31"))
+        elif $last.err then
+          "\n" + ("── Worker przerwany ──\n" + $last.text | paint("31"))
+        else
+          (([.results[] | select((.err | not) and .turns > 1)] | last) // $last) as $r
+          | "\n── Raport workera ──\n" + $r.text
+        end;
+    foreach (inputs | (fromjson? // empty)) as $e (
+      {text: null, out: [], bg: 0, tasks: {}, bgids: {}, results: [], limit: "allowed"};
+      .out = []
+      | if $e.type == "assistant" then
+          reduce (($e.message.content // [])[]?) as $c (.;
+            if $c.type == "text" and (($c.text // "") | test("\\S")) then
+              flush | .text = $c.text
+            elif $c.type == "tool_use" then
+              flush
+              | (($c.input // {}) as $i
+                 | ($i.description // $i.command // $i.file_path // $i.notebook_path // $i.pattern
+                    // $i.path // $i.url // $i.query // $i.reason // "" | line1) as $d
+                 | .out += ["▸ \($c.name)" + (if $d == "" then "" else ": \($d)" end) | step])
+            else . end)
+        elif $e.type == "user" then
+          reduce (($e.message.content // [])[]? | select(.type == "tool_result" and .is_error == true)) as $r (.;
+            .out += ["✗ " + ($r.content
+                             | if type == "array" then map(.text? // "") | join(" ") else tostring end
+                             | gsub("</?tool_use_error>"; "") | line1) | bad])
+        elif $e.type == "system" then
+          if $e.subtype == "task_started" then
+            .tasks[$e.task_id] = ($e.description // "" | line1)
+            | if $e.is_backgrounded == true then
+                .bgids[$e.task_id] = true | .out += ["⧗ W tle: " + task($e.task_id) | step]
+              else . end
+          elif $e.subtype == "task_updated" and $e.patch.is_backgrounded == true then
+            .bgids[$e.task_id] = true
+            | .out += ["⧗ Przeniesione w tle (przekroczony limit czasu komendy): " + task($e.task_id) | step]
+          elif $e.subtype == "background_tasks_changed" then
+            .bg = (($e.tasks // []) | length)
+          elif $e.subtype == "task_notification" and .bgids[$e.task_id] then
+            if $e.status == "completed" then
+              .out += ["↻ Zadanie w tle zakończone: " + task($e.task_id) | step]
+            else
+              .out += ["↻ Zadanie w tle przerwane (\($e.status)): " + task($e.task_id) | warn]
+            end
+          else . end
+        elif $e.type == "rate_limit_event" then
+          ($e.rate_limit_info // {}) as $l
+          | if ($l.status // "allowed") == .limit then .
+            else
+              .limit = ($l.status // "allowed")
+              | if .limit == "allowed" then .
+                elif .limit == "rejected" then
+                  .out += ["✗ Limit użycia wyczerpany (\($l.rateLimitType // "?"))" + ($l | until_time) | bad]
+                else
+                  .out += ["⚠ Limit użycia blisko (\($l.rateLimitType // "?")"
+                           + (if $l.utilization then ": \($l.utilization * 100 | round)%" else "" end)
+                           + ")" + ($l | until_time) | warn]
+                end
+            end
+        elif $e.type == "result" then
+          .text = null
+          | .results += [{text: ($e.result // "" | tostring), err: ($e.is_error == true), turns: ($e.num_turns // 0)}]
+          | if .bg > 0 and ($e.is_error != true) then
+              .out += [($e.result // "" | tostring | gsub("^\\s+"; "") | split("\n")[0] | narr),
+                       ("… Czekam na zadania w tle (\(.bg)); CLI wznowi workera, gdy się skończą." | step)]
+            else . end
+        elif $e.type == "ralph_eof" then
+          flush | .out += [report]
+        else . end;
+      .out[])'
 }
 
 # $1: a stream-json log file -> the session id to hand to `claude --resume`.
@@ -300,42 +448,48 @@ ralph_run_claude_worker() {
   rc=${PIPESTATUS[0]}
 
   echo
-  echo "Zapis runu: $log"
+  ralph_say dim "Zapis runu: $log"
   id=$(ralph_stream_session_id "$log")
-  [ -n "$id" ] && echo "Wznów sesję: claude --resume $id"
+  [ -n "$id" ] && ralph_say dim "Wznów sesję: claude --resume $id"
   return "$rc"
 }
 
-# stdin: Codex `exec --json` lines -> stdout: one short human line per step. A pure filter:
-# command runs become `▸ Bash: cmd` (with `✗ exit N` on failure), file changes `▸ Edit: path`
-# (add -> Write), MCP calls and web searches one line each; the last agent message is printed as
-# the model's summary once the turn completes. Everything else (thread/turn bookkeeping,
-# reasoning, unknown events, unparseable lines) is skipped. Steps are rendered on completion.
+# stdin: Codex `exec --json` lines -> stdout: what the worker is doing, for a human. A pure
+# filter, same look as ralph_render_stream: agent messages are the narration (`› …`), steps are
+# dimmed one-liners clipped to the terminal width — command runs `▸ Bash: cmd` (a failed one red,
+# `✗ Bash (exit N): cmd`), file changes `▸ Edit: path` (add -> Write), MCP calls and web searches.
+# The last agent message of a turn is printed as the report once the turn completes. Everything
+# else (thread/turn bookkeeping, reasoning, unknown events, unparseable lines) is skipped. Steps
+# are rendered on completion.
 ralph_render_codex_stream() {
-  jq -n -R --unbuffered -r --arg cwd "$PWD/" '
-    def first_line: tostring | split("\n")[0] | ltrimstr($cwd);
-    foreach (inputs | (fromjson? // empty)) as $e ({last: null, out: null};
-      .out = null
+  jq -n -R --unbuffered -r --arg cwd "$PWD/" --arg color "${RALPH_COLOR:-0}" \
+    --argjson w "$(ralph_term_cols)" "$RALPH_RENDER_JQ_DEFS"'
+    def flush: if .last != null then .out += [.last | narr] | .last = null else . end;
+    foreach (inputs | (fromjson? // empty)) as $e ({last: null, out: []};
+      .out = []
       | if $e.type == "item.completed" then
           ($e.item // {}) as $i
           | if $i.type == "agent_message" and ($i.text | type) == "string" then
-              .last = $i.text
+              flush | .last = $i.text
             elif $i.type == "command_execution" then
-              .out = "▸ Bash: \(($i.command // "") | first_line)"
-                + (if ($i.exit_code // 0) != 0 then " ✗ exit \($i.exit_code)" else "" end)
+              flush
+              | .out += [if ($i.exit_code // 0) != 0
+                         then "✗ Bash (exit \($i.exit_code)): \(($i.command // "") | line1)" | bad
+                         else "▸ Bash: \(($i.command // "") | line1)" | step end]
             elif $i.type == "file_change" then
-              .out = ([($i.changes // [])[]?
-                        | "▸ \(if .kind == "add" then "Write" elif .kind == "delete" then "Delete" else "Edit" end): \((.path // "") | first_line)"]
-                      | join("\n"))
+              flush
+              | .out += [($i.changes // [])[]?
+                         | "▸ \(if .kind == "add" then "Write" elif .kind == "delete" then "Delete" else "Edit" end): \((.path // "") | line1)"
+                         | step]
             elif $i.type == "mcp_tool_call" then
-              .out = "▸ MCP: \($i.server // "")/\($i.tool // "")"
+              flush | .out += ["▸ MCP: \($i.server // "")/\($i.tool // "")" | step]
             elif $i.type == "web_search" then
-              .out = "▸ WebSearch: \(($i.query // "") | first_line)"
+              flush | .out += ["▸ WebSearch: \(($i.query // "") | line1)" | step]
             else . end
         elif $e.type == "turn.completed" and .last != null then
-          .out = "\n── Raport workera ──\n" + .last | .last = null
+          .out += ["\n── Raport workera ──\n" + .last] | .last = null
         else . end;
-      .out | select(. != null and . != ""))'
+      .out[])'
 }
 
 # $1: a Codex JSONL log file -> the thread id to hand to `codex resume`.
@@ -367,13 +521,13 @@ ralph_run_codex_worker() {
   rc=${PIPESTATUS[0]}
 
   echo
-  echo "Zapis runu: $log"
+  ralph_say dim "Zapis runu: $log"
   if grep -q 'ERROR' "$err" 2>/dev/null; then
-    echo "Codex zgłosił błędy (stderr): $err"
-    grep 'ERROR' "$err" | sort -u -k2 | head -3 | sed 's/^/  /'
+    ralph_say err "Codex zgłosił błędy (stderr): $err
+$(grep 'ERROR' "$err" | sort -u -k2 | head -3 | sed 's/^/  /')"
   fi
   id=$(ralph_codex_thread_id "$log")
-  [ -n "$id" ] && echo "Wznów sesję: codex resume $id"
+  [ -n "$id" ] && ralph_say dim "Wznów sesję: codex resume $id"
   return "$rc"
 }
 
@@ -384,7 +538,11 @@ ralph_run_codex_interactive() {
   local args=(--no-alt-screen --approve-for-me -C "$PWD")
   [ -n "$model" ] && args+=(-m "$model")
   [ -n "$effort" ] && args+=(-c "model_reasoning_effort=\"$effort\"")
-  codex "${args[@]}" "$prompt"
+  if [ "${RALPH_TERM_FDS:-}" = 1 ]; then
+    codex "${args[@]}" "$prompt" >&3 2>&4
+  else
+    codex "${args[@]}" "$prompt"
+  fi
 }
 
 # stdin: an issue's label names, one per line -> `afk` (has ready-for-agent: unattended) or
@@ -394,9 +552,15 @@ ralph_worker_mode() {
 }
 
 # Claude HITL session: the interactive CLI in auto mode, so the human can talk to the worker.
+# Under a run log stdout is a pipe; the session gets the terminal back (fds 3/4) and stays out
+# of the log — its transcript is the runtime's own session.
 ralph_run_claude_interactive() {
   local model="$1" effort="$2" prompt="$3"
-  claude --permission-mode auto --model "$model" --effort "$effort" "$prompt"
+  if [ "${RALPH_TERM_FDS:-}" = 1 ]; then
+    claude --permission-mode auto --model "$model" --effort "$effort" "$prompt" >&3 2>&4
+  else
+    claude --permission-mode auto --model "$model" --effort "$effort" "$prompt"
+  fi
 }
 
 # $6: mode, `afk` (default, unattended) or `hitl` (interactive session with a human present).
@@ -490,7 +654,7 @@ ralph_acquire_lock() {
 
     if ralph_pid_alive "$pid"; then
       if [ ! -t 0 ]; then
-        echo "Ralph już działa w tym worktree; tryb nieinteraktywny przerywa." >&2
+        ralph_say err "Ralph już działa w tym worktree; tryb nieinteraktywny przerywa." >&2
         return 1
       fi
 
@@ -547,8 +711,8 @@ ralph_trap_release_lock() {
 
 ralph_warn_dirty_tree() {
   if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
-    echo "⚠️  Ralph zostawił niezacommitowane zmiany w drzewie roboczym."
-    echo "   Sprawdź (git status) i domknij je, zanim odpalisz kolejny przebieg."
+    ralph_say warn "⚠️  Ralph zostawił niezacommitowane zmiany w drzewie roboczym.
+   Sprawdź (git status) i domknij je, zanim odpalisz kolejny przebieg."
   fi
 }
 
@@ -601,6 +765,20 @@ RALPH_EXIT_AFK_FAILED=3  # AFK run left the issue open, still ready-for-agent
 RALPH_EXIT_DISCOVERED=4  # AFK run left it open without ready-for-agent (discovered HITL)
 RALPH_EXIT_HITL_OPEN=5   # HITL session ended, issue open without ready-for-agent
 RALPH_EXIT_HITL_TO_AFK=6 # HITL session ended, issue open with ready-for-agent restored
+
+# $1: exit code of a finished worker run (from ralph_run_outcome); $2: issue number -> the
+# one-line verdict, coloured: green done, orange waiting for a human, red failure.
+ralph_outcome_message() {
+  local code="$1" num="$2"
+  case "$code" in
+    "$RALPH_EXIT_DONE") ralph_say ok "✓ Issue #${num} zamknięte." ;;
+    "$RALPH_EXIT_HITL_TO_AFK") ralph_say ok "✓ Issue #${num} oddane pętli (przywrócone ready-for-agent)." ;;
+    "$RALPH_EXIT_AFK_FAILED") ralph_say err "✗ Issue #${num} nie zostało domknięte (nadal ma ready-for-agent)." ;;
+    "$RALPH_EXIT_DISCOVERED") ralph_say warn "⚠ Issue #${num} wymaga człowieka: worker zdjął ready-for-agent (odkryty HITL)." ;;
+    "$RALPH_EXIT_HITL_OPEN") ralph_say warn "⚠ Sesja HITL skończona, issue #${num} nadal otwarte bez ready-for-agent." ;;
+    *) ralph_say err "✗ Nie udało się odczytać stanu issue #${num} po runie." ;;
+  esac
+}
 
 # Pure: the exit code for a finished worker run. $1: mode (afk|hitl); $2: issue state
 # (open|closed); $3: "true" when the issue has `ready-for-agent`. Anything but a clean
@@ -658,7 +836,7 @@ ralph_mark_epic_if_ready() {
     --description "Implemented; awaiting human verification" >/dev/null 2>&1 || true
   gh issue edit "$epic" --add-label needs-human-test >/dev/null 2>&1 || return 1
   gh issue comment "$epic" --body "Epic gotowy do odbioru: wszystkie sub-issues zamknięte. Scenariusz w sekcji ## Jak odebrać." >/dev/null 2>&1
-  echo "Epic #${epic}: wszystkie sub-issues zamknięte — oznaczony needs-human-test (do odbioru)."
+  ralph_say ok "Epic #${epic}: wszystkie sub-issues zamknięte — oznaczony needs-human-test (do odbioru)."
 }
 
 # Runs ralph_mark_epic_if_ready over every open [PRD] issue, whoever closed the last sub-issue.
@@ -741,7 +919,7 @@ ralph_base_branch() {
   [ -n "$lines" ] || return 0
   count=$(printf '%s\n' "$lines" | wc -l | tr -d ' ')
   if [ "$count" != 1 ]; then
-    echo "Sekcja ## Ralph deklaruje ralph-base-branch więcej niż raz — zostaw jedną linię." >&2
+    ralph_say err "Sekcja ## Ralph deklaruje ralph-base-branch więcej niż raz — zostaw jedną linię." >&2
     return 1
   fi
   line="$lines"
@@ -750,8 +928,8 @@ ralph_base_branch() {
     printf '%s\n' "$value"
     return 0
   fi
-  echo "Zła składnia linii gałęzi bazowej w ## Ralph: '$line'." >&2
-  echo "Oczekiwano dokładnie: ralph-base-branch: <gałąź> (np. ralph-base-branch: dev)." >&2
+  ralph_say err "Zła składnia linii gałęzi bazowej w ## Ralph: '$line'.
+Oczekiwano dokładnie: ralph-base-branch: <gałąź> (np. ralph-base-branch: dev)." >&2
   return 1
 }
 
@@ -770,8 +948,8 @@ ralph_issue_parent() {
 # travel across a checkout or block a merge: refuse, with a message, rc 1.
 ralph_require_clean_tree() {
   if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
-    echo "Drzewo robocze nie jest czyste — nie przełączam gałęzi i nie uruchamiam workera." >&2
-    echo "Domknij albo odłóż zmiany (git status), potem odpal ponownie." >&2
+    ralph_say err "Drzewo robocze nie jest czyste — nie przełączam gałęzi i nie uruchamiam workera.
+Domknij albo odłóż zmiany (git status), potem odpal ponownie." >&2
     return 1
   fi
 }
@@ -788,8 +966,8 @@ ralph_prepare_branch() {
 
   ralph_require_clean_tree || return 1
   if ! git rev-parse --verify --quiet "refs/heads/$base" >/dev/null; then
-    echo "Nie ma lokalnej gałęzi bazowej '$base' (ralph-base-branch w ## Ralph)." >&2
-    echo "Utwórz ją albo popraw linię; pętla nie pobiera gałęzi z remote." >&2
+    ralph_say err "Nie ma lokalnej gałęzi bazowej '$base' (ralph-base-branch w ## Ralph).
+Utwórz ją albo popraw linię; pętla nie pobiera gałęzi z remote." >&2
     return 1
   fi
 
@@ -817,7 +995,9 @@ ralph_prepare_branch() {
   fi
   # Abort whatever the failed merge left behind; the tree was clean before it, so this restores it.
   git merge --abort 2>/dev/null || git reset -q --merge 2>/dev/null
-  echo "Konflikt przy scalaniu $base do $branch — merge przerwany, drzewo czyste, worker nie rusza." >&2
-  echo "Rozwiąż ręcznie: git checkout $branch && git merge $base, potem odpal ponownie." >&2
+  ralph_say err "Konflikt przy scalaniu $base do $branch — merge przerwany, drzewo czyste, worker nie rusza.
+Rozwiąż ręcznie: git checkout $branch && git merge $base, potem odpal ponownie." >&2
   return 1
 }
+
+ralph_color_init

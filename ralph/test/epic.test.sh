@@ -12,6 +12,9 @@ LAST_OUT=""; LAST_RC=0
 
 FAKE=$(mktemp -d)
 trap 'rm -rf "$FAKE"' EXIT
+# No run log by default: the tests run inside this repo and must not write to its .git. The run
+# log has its own test below, in a throwaway repo. Plain output, so substrings match.
+export RALPH_RUN_LOG=off RALPH_COLOR=0
 mkdir -p "$FAKE/bin"
 
 cat > "$FAKE/bin/gh" <<'GH'
@@ -38,6 +41,7 @@ sed -i.bak 1d "$FAKE_DIR/seq"
 [ -n "$issue" ] && [ -n "${RALPH_ISSUE_FILE:-}" ] && echo "$issue" > "$RALPH_ISSUE_FILE"
 [ "$ready" = ready ] && touch "$FAKE_DIR/ready"
 [ "${RALPH_NOTIFY_HITL:-}" = 1 ] && echo hitl-flag >> "$FAKE_DIR/once-args"
+echo "runlog:${RALPH_RUN_LOG:-}" >> "$FAKE_DIR/once-args"
 exit "${code:-1}"
 ONCE
 chmod +x "$FAKE/bin/gh" "$FAKE/bin/osascript" "$FAKE/once"
@@ -146,6 +150,27 @@ LAST_OUT=$(FAKE_DIR="$FAKE" PATH="$NOOSA" RALPH_ONCE_CMD="$FAKE/once" bash "$EPI
 expect "no osascript -> same behaviour, no notifications" 0 "gotowy do odbioru"
 expect_eq "  nothing notified" "$(ls "$FAKE/notifications" 2>/dev/null | wc -l | tr -d ' ')" "0"
 rm -rf "$NOOSA"
+
+# Run log: the whole output lands in <git dir>/ralph-logs/<stamp>-epic-<n>.log, colour stripped,
+# framed by start/end lines with the exit code; the screen keeps the colour; the rc is kept.
+LOGREPO=$(mktemp -d)
+git -C "$LOGREPO" init -q
+rm -f "$FAKE"/{ready,notifications,once-args}
+printf '0 12\n0 13 ready\n' > "$FAKE/seq"; printf '10\n' > "$FAKE/epics"; printf '%s' "$SUBS" > "$FAKE/subs.json"
+LAST_OUT=$(cd "$LOGREPO" && env -u RALPH_RUN_LOG FAKE_DIR="$FAKE" PATH="$FAKE/bin:$PATH" RALPH_ONCE_CMD="$FAKE/once" \
+  RALPH_COLOR=1 bash "$EPIC" 10 2>&1); LAST_RC=$?
+logs=$(ls "$LOGREPO/.git/ralph-logs" 2>/dev/null)
+expect "run log: rc of the loop is kept" 0 "Log przebiegu:"
+expect_eq "  one log named after the epic" "$(sed -E 's/[0-9]{8}-[0-9]{6}/STAMP/' <<<"$logs")" "STAMP-epic-10.log"
+log="$LOGREPO/.git/ralph-logs/$logs"
+expect_eq "  log holds the loop's output" "$(grep -c 'gotowy do odbioru' "$log" 2>/dev/null)" "1"
+expect_eq "  log has no colour codes" "$(grep -c $'\x1b' "$log" 2>/dev/null)" "0"
+expect_eq "  log ends with the exit code" "$(tail -1 "$log" | sed 's/.*kod wyjścia: //')" "0"
+case "$LAST_OUT" in *$'\x1b[32m'*) r=yes ;; *) r=no ;; esac
+expect_eq "  screen keeps colour (green ready)" "$r" "yes"
+expect_eq "  once.sh inherits the log (so it opens none of its own)" \
+  "$(grep -c "^runlog:.git/ralph-logs/$logs\$" "$FAKE/once-args")" "2"
+rm -rf "$LOGREPO"
 
 # Argument errors.
 run $'0' foo
