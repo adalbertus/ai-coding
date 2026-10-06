@@ -101,6 +101,12 @@ tool names as if they were the protocol itself.
 A cheap-model run that, from the open tasks, picks the single next one — it implements nothing.
 GitHub flavour only; the local flavour has no selector.
 
+**Bloker** (blocker):
+An open issue linked to a task by GitHub's native "blocked by" relation. A task with no open
+blocker is **wolne** (free); only free tasks reach the selector. The "Blocked by" section in an
+issue body is description only, never the source of truth. GitHub flavour only.
+_Avoid_: deriving blockers from body text.
+
 **Strażnik** (preflight guard):
 A fail-closed gate run before any work (in `ralph/preflight.sh`): `grep` for the `## Ralph`
 section in the selected runtime's native contract file, then a cheap runtime-selected check that

@@ -25,6 +25,8 @@ case "$args" in
   *"--label needs-human-test"*) cat "$FAKE_DIR/pending" 2>/dev/null ;;
   "issue list --state open"*) cat "$FAKE_DIR/epics" 2>/dev/null ;;
   "api --paginate repos/{owner}/{repo}/issues/"*"/sub_issues") cat "$FAKE_DIR/subs.json" 2>/dev/null ;;
+  "api --paginate repos/{owner}/{repo}/issues/13/dependencies/blocked_by") echo '[{"number":12,"state":"open"}]' ;;
+  "api --paginate repos/{owner}/{repo}/issues/"*"/dependencies/blocked_by") echo '[]' ;;
   "issue view"*"--json labels"*) [ -f "$FAKE_DIR/ready" ] && echo true || echo false ;;
 esac
 GH
@@ -112,6 +114,8 @@ expect "HITL unresolved -> stop naming the issue" 5 "Sesja HITL dla issue #13"
 run $'2' 10
 expect "nothing to do -> stop listing open sub-issues" 2 "#13: Decyzja (HITL)"
 expect "  lists AFK ones too" 2 "#12: Afk"
+expect "  names the open blocker of a blocked one" 2 "#13: Decyzja (HITL) ← #12"
+expect_eq "  a free one gets no arrow" "$(grep -c '#12: Afk ←' <<<"$LAST_OUT")" "0"
 
 run $'1 12' 10
 expect "error -> stop with the cause" 1 "kod 1"

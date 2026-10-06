@@ -310,7 +310,8 @@ zmiana (epic z jednym sub-issue). Terminologia: `CONTEXT.md` (**Epic**, **Odbió
    `## Ralph` do `CLAUDE.md` i `AGENTS.md`, tworzy labelki pętli na GitHubie.
 2. **`/to-issues-ralph` / `$to-issues-ralph`** — z planu/PRD publikuje epic (`[PRD]` z PRD i
    scenariuszem `## Jak odebrać`, label `ready-for-agent`) oraz sub-issues (vertical slices)
-   z triage `complexity:*`. Sub-issues nie mają sekcji ręcznej — scenariusz jest jeden, w epicu.
+   z natywnymi relacjami „blocked by” i triage `complexity:*`. Sub-issues nie mają sekcji
+   ręcznej — scenariusz jest jeden, w epicu.
    Po tym kroku nie musisz nic robić poza uruchomieniem pętli.
 3. **`ralph-once`** (albo `ralph-once-local`) w pętli z terminala — implementacja AFK, jedno
    sub-issue na run.
@@ -388,12 +389,15 @@ Sesja HITL rozwiązana (issue domknięte albo z przywróconym `ready-for-agent`)
 otwartych sub-issues na starcie (zapas na sesję HITL po odkryciu); chroni tylko przed pętlą bez
 końca. Kod: `ralph/epic.sh`; testy: `ralph/test/epic.test.sh` (atrapa `once.sh`, fałszywe `gh`).
 
-**Blokery rozstrzyga skrypt.** Przed selektorem (w pętli i w trybie epicu) `lib.sh` czyta z sekcji
-„Blocked by” każdego kandydata numery issues (`#12` i `12`) i odrzuca kandydata, jeśli którykolwiek
-bloker jest otwarty (czysta funkcja `ralph_filter_unblocked`). Selektor dostaje tylko wolne issues
-i decyduje wyłącznie o kolejności; gdy po filtrze nic nie zostaje, pętla mówi, że wszystkie
-kandydaty są zablokowane, i nie wywołuje selektora. Selektora nie ma też przy jednym wolnym
-kandydacie ani w trybie epicu (tam decyduje numer).
+**Blokery rozstrzyga skrypt.** Bloker to natywna relacja GitHuba „blocked by” (zakłada ją
+`to-issues-ralph`; ręcznie: „Mark as blocked by” w issue). Sekcja „Blocked by” w treści to tylko
+opis — skrypt jej nie czyta. Przed selektorem (w pętli i w trybie epicu) `lib.sh` pobiera
+kandydatów przez REST API i odrzuca każdego z otwartym blokerem (`issue_dependencies_summary`,
+czysta funkcja `ralph_filter_unblocked`). Gdy GitHub nie odpowie, run kończy się błędem — bez
+listy blokerów nic nie jest wybierane. Selektor dostaje tylko wolne issues i decyduje wyłącznie
+o kolejności; gdy po filtrze nic nie zostaje, pętla wypisuje każdego kandydata z jego otwartymi
+blokerami (`#3 ← #7`) i nie wywołuje selektora (`ralph-epic` robi to samo w komunikacie stopu).
+Selektora nie ma też przy jednym wolnym kandydacie ani w trybie epicu (tam decyduje numer).
 
 **Gałąź per epic** (opcjonalnie, gdy `## Ralph` ma `ralph-base-branch: <baza>`): `ralph-once` przed
 workerem odmawia przy brudnym drzewie, a potem dla sub-issue przełącza się na `epic/<nr epicu>`

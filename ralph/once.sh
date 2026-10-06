@@ -114,8 +114,12 @@ if [ -z "$ISSUE_ARG" ] || [ -n "$EPIC_ARG" ]; then
 
   # Epic mode also needs the HITL sub-issues (no `ready-for-agent`), so fetch labels too and
   # narrow to AFK here for the loop; ralph_epic_stage does the AFK-then-HITL choice for an epic.
-  issues_json=$(gh issue list --state open --limit 200 \
-    --json number,title,body,labels 2>/dev/null | jq -c 'map(select(.title | startswith("[PRD]") | not))')
+  # Fail-closed: without an answer from GitHub there are no blockers to trust, so no run.
+  if ! issues_json=$(ralph_open_issues); then
+    ralph_say err "Nie udało się pobrać otwartych zadań z GitHuba (gh api) — bez blokerów nie wybieram zadania."
+    exit "$RALPH_EXIT_ERROR"
+  fi
+  issues_json=$(jq -c 'map(select(.title | startswith("[PRD]") | not))' <<<"$issues_json")
   if [ -z "$EPIC_ARG" ]; then
     issues_json=$(jq -c 'map(select(any(.labels[]?; .name == "ready-for-agent")))' <<<"${issues_json:-[]}")
   fi
@@ -125,13 +129,13 @@ if [ -z "$ISSUE_ARG" ] || [ -n "$EPIC_ARG" ]; then
   else
     issues_json=$(ralph_filter_started_epic "$epics" <<<"$issues_json")
   fi
-  # Blockers are settled here, deterministically (all open issues, not just ready-for-agent
-  # ones): the selector only ever sees free issues and decides order alone.
-  open_numbers=$(gh issue list --state open --limit 500 --json number --jq '[.[].number]' 2>/dev/null)
-  candidates=$(jq -r 'length' <<<"$issues_json")
-  issues_json=$(ralph_filter_unblocked "${open_numbers:-[]}" <<<"$issues_json")
-  if [ "$candidates" -gt 0 ] && [ "$(jq -r 'length' <<<"$issues_json")" = 0 ]; then
-    ralph_say warn "Wszystkie kandydaty są zablokowane (otwarty bloker w sekcji „Blocked by”). Nie wywołuję selektora."
+  # Blockers are settled here, deterministically, from GitHub's native "blocked by" relation:
+  # the selector only ever sees free issues and decides order alone.
+  candidates_json="$issues_json"
+  issues_json=$(ralph_filter_unblocked <<<"$issues_json")
+  if [ "$(jq -r 'length' <<<"$candidates_json")" -gt 0 ] && [ "$(jq -r 'length' <<<"$issues_json")" = 0 ]; then
+    ralph_say warn "Wszystkie kandydaty są zablokowane (otwarty bloker w relacji „blocked by”). Nie wywołuję selektora.
+$(ralph_blocked_report <<<"$candidates_json")"
     exit "$RALPH_EXIT_NOTHING"
   fi
   if [ -n "$EPIC_ARG" ]; then

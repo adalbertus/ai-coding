@@ -504,16 +504,15 @@ S_BOTH="[{\"number\":1,\"labels\":$L_HITL},{\"number\":2,\"labels\":$L_AFK},{\"n
 expect_eq "stage: free AFK present -> only AFK" "$(ralph_epic_stage <<<"$S_BOTH" | nums)" "2,3"
 S_HITL="[{\"number\":1,\"labels\":$L_HITL},{\"number\":4,\"labels\":[]}]"
 expect_eq "stage: no AFK, free HITL -> HITL" "$(ralph_epic_stage <<<"$S_HITL" | nums)" "1,4"
-BLK_H=$'## Blocked by\n\n- #9'
-S_BLK="[{\"number\":1,\"labels\":$L_HITL,\"body\":\"$(printf '%s' "$BLK_H" | jq -Rs . | sed 's/^"//;s/"$//')\"}]"
+S_BLK="[{\"number\":1,\"labels\":$L_HITL,\"issue_dependencies_summary\":{\"blocked_by\":1}}]"
 expect_eq "stage: blocked HITL dropped by filter -> nothing" \
-  "$(ralph_filter_unblocked '[9]' <<<"$S_BLK" | ralph_epic_stage | nums)" ""
+  "$(ralph_filter_unblocked <<<"$S_BLK" | ralph_epic_stage | nums)" ""
 expect_eq "pick first: lowest number, whatever the order" \
   "$(ralph_pick_first <<<'[{"number":9},{"number":7},{"number":8}]')" "7"
 expect_eq "pick first: empty list -> nothing" "$(ralph_pick_first <<<'[]')" ""
 expect_eq "stage: blocked AFK, free HITL -> HITL" \
-  "$(jq -c '[.[0] + {labels: [{"name":"ready-for-agent"}]}] + [{"number":7,"labels":[],"body":""}]' <<<"$S_BLK" \
-    | ralph_filter_unblocked '[9]' | ralph_epic_stage | nums)" "7"
+  "$(jq -c '[.[0] + {labels: [{"name":"ready-for-agent"}]}] + [{"number":7,"labels":[],"issue_dependencies_summary":{"blocked_by":0}}]' <<<"$S_BLK" \
+    | ralph_filter_unblocked | ralph_epic_stage | nums)" "7"
 expect_eq "stage: empty -> empty" "$(ralph_epic_stage <<<'[]' | nums)" ""
 
 # --- Exit code of a finished run ---
@@ -709,23 +708,51 @@ expect_fail "issue parent: other gh failure -> error, not 'no parent'" \
   env PATH="$fake_gh_dir:$PATH" FAKE_GH_MODE=down bash -c ". '$SCRIPT_DIR/../lib.sh'; ralph_issue_parent 13"
 rm -rf "$fake_gh_dir"
 
-# --- ralph_filter_unblocked: issues with an open blocker are dropped ---
-mk() { jq -cn --argjson n "$1" --arg b "$2" '{number: $n, title: "t", body: $b}'; }
-blk() { printf '## What\nx\n\n## Blocked by\n\n%s\n\n## Other\nsee #99\n' "$1"; }
-unblocked() { printf '%s\n' "$@" | jq -cs '.' | ralph_filter_unblocked "$OPEN" | nums; }
-OPEN='[12,30]'
-expect_eq "unblocked: #12 open -> rejected" "$(unblocked "$(mk 1 "$(blk '- #12')")")" ""
-expect_eq "unblocked: bare 12 open -> rejected" "$(unblocked "$(mk 1 "$(blk '- 12')")")" ""
-expect_eq "unblocked: closed blocker -> passes" "$(unblocked "$(mk 1 "$(blk '- #13')")")" "1"
-expect_eq "unblocked: None -> passes" "$(unblocked "$(mk 1 "$(blk 'None - can start immediately')")")" "1"
-expect_eq "unblocked: no section -> passes" "$(unblocked "$(mk 1 '## What
-x #12')")" "1"
-expect_eq "unblocked: null body -> passes" "$(unblocked '{"number":1,"title":"t","body":null}')" "1"
-expect_eq "unblocked: several, one open -> rejected" "$(unblocked "$(mk 1 "$(blk '- #13
-- #12')")")" ""
-expect_eq "unblocked: number after the section is ignored" "$(unblocked "$(mk 1 "$(blk '- #13')")")" "1"
-expect_eq "unblocked: keeps order of the free ones" "$(unblocked "$(mk 1 "$(blk '- #12')")" "$(mk 2 "$(blk 'None')")" "$(mk 3 "$(blk '- 5')")")" "2,3"
-expect_eq "unblocked: no open issues -> all pass" "$(printf '%s' "$(mk 1 "$(blk '- #12')")" | jq -cs . | ralph_filter_unblocked '[]' | nums)" "1"
+# --- ralph_filter_unblocked: issues with an open blocker (native "blocked by") are dropped ---
+# $1: number, $2: open blockers, $3: all blockers (default = $2), $4: body (default empty).
+mk() { jq -cn --argjson n "$1" --argjson o "$2" --argjson t "${3:-$2}" --arg b "${4:-}" \
+  '{number: $n, title: "t", body: $b, issue_dependencies_summary: {blocked_by: $o, total_blocked_by: $t}}'; }
+unblocked() { printf '%s\n' "$@" | jq -cs '.' | ralph_filter_unblocked | nums; }
+expect_eq "unblocked: open blocker -> rejected" "$(unblocked "$(mk 1 1)")" ""
+expect_eq "unblocked: only closed blockers -> passes" "$(unblocked "$(mk 1 0 2)")" "1"
+expect_eq "unblocked: no blockers -> passes" "$(unblocked "$(mk 1 0)")" "1"
+expect_eq "unblocked: no dependency summary -> rejected (fail-closed)" "$(unblocked '{"number":1,"title":"t","body":""}')" ""
+expect_eq "unblocked: numbers in the body text are ignored" \
+  "$(unblocked "$(mk 1 0 0 $'## Blocked by\n\n- #12\n\nheavy: przesuwne 7 dni')")" "1"
+expect_eq "unblocked: keeps order of the free ones" "$(unblocked "$(mk 3 0)" "$(mk 1 1)" "$(mk 2 0)")" "3,2"
+
+# --- gh layer for blockers: candidates fetch (fail-closed) and the open-blocker report ---
+fake_gh_dir=$(mktemp -d)
+cat > "$fake_gh_dir/gh" <<'FAKE_GH'
+#!/usr/bin/env bash
+[ "$FAKE_GH_MODE" = down ] && { echo 'error connecting to api.github.com' >&2; exit 1; }
+case "$*" in
+  "api --paginate repos/{owner}/{repo}/issues?state=open&per_page=100")
+    echo '[{"number":5,"title":"a","body":null,"labels":[],"issue_dependencies_summary":{"blocked_by":0}},{"number":6,"title":"pr","pull_request":{}}]'
+    echo '[{"number":7,"title":"b","body":"x","labels":[{"name":"ready-for-agent"}],"issue_dependencies_summary":{"blocked_by":1}}]' ;;
+  "api --paginate repos/{owner}/{repo}/issues/3/dependencies/blocked_by")
+    echo '[{"number":7,"state":"open"},{"number":2,"state":"closed"}]' ;;
+  "api --paginate repos/{owner}/{repo}/issues/9/dependencies/blocked_by")
+    echo '[{"number":3,"state":"open"}]'; echo '[{"number":6,"state":"open"}]' ;;
+  "api --paginate repos/{owner}/{repo}/issues/"*"/dependencies/blocked_by") echo '[]' ;;
+  *) exit 1 ;;
+esac
+FAKE_GH
+chmod +x "$fake_gh_dir/gh"
+expect_eq "open issues: all pages, pull requests dropped" \
+  "$(PATH="$fake_gh_dir:$PATH" ralph_open_issues | nums)" "5,7"
+expect_eq "open issues: keeps labels and the dependency summary" \
+  "$(PATH="$fake_gh_dir:$PATH" ralph_open_issues | jq -c '.[1] | [.labels[0].name, .issue_dependencies_summary.blocked_by]')" '["ready-for-agent",1]'
+expect_fail "open issues: gh failure -> error, not an empty list" \
+  env PATH="$fake_gh_dir:$PATH" FAKE_GH_MODE=down bash -c ". '$SCRIPT_DIR/../lib.sh'; ralph_open_issues"
+expect_eq "open blockers: only open ones" "$(PATH="$fake_gh_dir:$PATH" ralph_open_blockers 3)" "#7"
+expect_eq "open blockers: all pages" "$(PATH="$fake_gh_dir:$PATH" ralph_open_blockers 9)" "#3, #6"
+expect_eq "open blockers: none -> nothing" "$(PATH="$fake_gh_dir:$PATH" ralph_open_blockers 4)" ""
+expect_eq "open blockers: gh failure -> '?'" "$(PATH="$fake_gh_dir:$PATH" FAKE_GH_MODE=down ralph_open_blockers 3)" "?"
+expect_eq "blocked report: one line per issue with its open blockers" \
+  "$(printf '[{"number":3},{"number":9}]' | PATH="$fake_gh_dir:$PATH" ralph_blocked_report)" "  #3 ← #7
+  #9 ← #3, #6"
+rm -rf "$fake_gh_dir"
 
 # --- ralph_epic_ready_to_mark: pure decision (total sub-issues, open sub-issues, has label) ---
 expect_ok "mark: all closed, no label -> mark" ralph_epic_ready_to_mark 3 0 false

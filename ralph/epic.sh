@@ -56,11 +56,16 @@ open_count=$(jq -r --argjson e "$epic" '[.[] | select(.number == $e) | .open[]] 
 limit=$(ralph_epic_iteration_limit "${open_count:-0}")
 echo "ralph-epic: epic #${epic}, otwartych sub-issues: ${open_count:-0}, limit iteracji: ${limit} (runtime ${runtime}${RALPH_FORCE_MODEL:+, model wymuszony: $RALPH_FORCE_MODEL/high})."
 
-# Open sub-issues of the epic as "  #n: title (HITL)" lines.
+# Open sub-issues of the epic as "  #n: title (HITL) ← #blockers" lines (arrow only when blocked).
 open_list() {
+  local n line blockers
   gh api --paginate "repos/{owner}/{repo}/issues/${epic}/sub_issues" 2>/dev/null | jq -s -r 'add // []
     | .[] | select(.state == "open")
-    | "  #\(.number): \(.title)" + (if any(.labels[]?; .name == "ready-for-agent") then "" else " (HITL)" end)'
+    | "\(.number)\t  #\(.number): \(.title)" + (if any(.labels[]?; .name == "ready-for-agent") then "" else " (HITL)" end)' \
+    | while IFS=$'\t' read -r n line; do
+        blockers=$(ralph_open_blockers "$n")
+        printf '%s%s\n' "$line" "${blockers:+ ← $blockers}"
+      done
 }
 
 issue_file=$(mktemp)
@@ -90,7 +95,7 @@ while :; do
 "Sesja HITL dla issue #${issue:-?} (epic #${epic}) skończyła się bez rozwiązania. Rozstrzygnij je (domknij albo przywróć ready-for-agent) i uruchom ralph-epic ponownie." ;;
     stop-nothing)
       finish "$RALPH_EXIT_NOTHING" "Ralph: nic do zrobienia" \
-"Epic #${epic} ma otwarte sub-issues, ale żadne nie jest wolne — każde ma otwarty bloker w „Blocked by”:
+"Epic #${epic} ma otwarte sub-issues, ale żadne nie jest wolne — każde ma otwarty bloker (relacja „blocked by”):
 $(open_list)" ;;
     stop-error)
       finish "$RALPH_EXIT_ERROR" "Ralph: błąd" \

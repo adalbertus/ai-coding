@@ -16,9 +16,6 @@ and tell the human, in your first message, what decision or action is needed fro
 recommendation and the reasoning behind it. Then wait for their answer. If the issue turns out to
 need nothing from them after all, say so and go on.
 
-Check that it is unblocked: if its "Blocked by" section references an issue that is still open
-(`gh issue view <blocker>`), tell the human and let them decide whether to go on.
-
 # REPO CONTRACT (## Ralph in CLAUDE.md)
 
 Everything specific to THIS repo — the feedback-loop commands to run, what "done" means

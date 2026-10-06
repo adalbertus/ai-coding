@@ -40,12 +40,22 @@ checkpoints. Delegating (not copying) means upstream changes keep working here.
    > a native sub-issue of the epic from step 1: set the parent with
    > `gh issue create --parent <epic number>`. Do NOT add a `## Jak sprawdzić ręcznie`
    > section to any slice — manual acceptance belongs to the epic. After publishing, in
-   > the same turn, continue with steps 3–4 of `to-issues-ralph`.
+   > the same turn, continue with steps 3–5 of `to-issues-ralph`.
 
    It applies the AFK triage label itself. Prefix every issue title with `[ISSUE]`
    (e.g. `[ISSUE] Add user login`).
 
-3. **Triage complexity.** Add **exactly one** `complexity:*` label to each **sub-issue**
+3. **Link blockers.** The loop takes blockers only from GitHub's native "blocked by"
+   relation, never from body text. For every sub-issue whose `## Blocked by` section names
+   other issues, add each one as a native blocker (`issue_id` is the blocker's internal `id`,
+   not its number):
+   ```bash
+   gh api -X POST "repos/{owner}/{repo}/issues/<n>/dependencies/blocked_by" \
+     -F issue_id="$(gh api "repos/{owner}/{repo}/issues/<blocker>" --jq .id)"
+   ```
+   Leave the `## Blocked by` text as written. A sub-issue without blockers needs nothing.
+
+4. **Triage complexity.** Add **exactly one** `complexity:*` label to each **sub-issue**
    (never to the epic), using the rubric below. Create the label first if the repo lacks it:
    ```bash
    gh label create complexity:heavy   --color B60205 --description "Highest-capability model" 2>/dev/null
@@ -54,12 +64,12 @@ checkpoints. Delegating (not copying) means upstream changes keep working here.
    gh issue edit <n> --add-label complexity:<tier>
    ```
 
-4. **Record why (heavy only).** For a `complexity:heavy` sub-issue, add one line to its body
-   stating why (e.g. "heavy — touches tenant-isolation logic"), for the human reader who
-   picks it up weeks later.
+5. **Record why (heavy only).** For a `complexity:heavy` sub-issue, insert a `## Complexity`
+   section directly before `## Blocked by`, holding one line that states why (e.g. "heavy —
+   touches tenant-isolation logic").
 
 End the turn only here, with the epic (number, title) followed by one line per sub-issue:
-number, title, tier.
+number, title, tier, blockers.
 
 ## Complexity rubric
 

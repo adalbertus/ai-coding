@@ -17,8 +17,7 @@ already confirmed the section exists and is usable, so it is safe to rely on.
 # SANITY CHECK BEFORE STARTING
 
 The `ready-for-agent` label is the contract for AFK-ready work, but that separation is by
-convention, not guaranteed — an issue can be mislabelled, and the blocked check upstream
-is best-effort. So before implementing, verify two things with `gh`:
+convention, not guaranteed — an issue can be mislabelled. So before implementing, verify:
 
 - **Still AFK?** If the issue actually requires a human decision or a human action — an
   architectural choice, a design review, an ambiguous trade-off the body does not settle, or a
@@ -27,9 +26,6 @@ is best-effort. So before implementing, verify two things with `gh`:
   does not pick it up again, comment exactly what is needed, with your recommendation
   (`gh issue comment <number>`), and output <promise>NO MORE TASKS</promise>. It returns to the
   loop only when the human restores the label.
-- **Still unblocked?** If its "Blocked by" section references an issue that is still open
-  (`gh issue view <blocker>`), do the same: comment that it is blocked and output
-  <promise>NO MORE TASKS</promise>.
 
 # EXPLORATION
 

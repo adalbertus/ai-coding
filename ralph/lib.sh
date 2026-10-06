@@ -797,21 +797,38 @@ ralph_run_outcome() {
   fi
 }
 
-# stdin: issues array (with `body`); $1: JSON array of numbers of all open issues. Drops every
-# issue whose "Blocked by" section (heading line up to the next heading) mentions an open issue,
-# as `#12` or bare `12`. No section, or "None - can start immediately" -> passes.
+# Pure. stdin: issues array as the REST API returns it (with `issue_dependencies_summary`).
+# Keeps only free issues: no open blocker in GitHub's native "blocked by" relation. The body
+# text — including its "Blocked by" section — is never read. No summary -> dropped (fail-closed).
 ralph_filter_unblocked() {
-  jq -c --argjson open "$1" '
-    map(select(
-      (.body // "" | split("\n")) as $l
-      | (first(range(0; $l | length) | select($l[.] | test("^#+\\s*blocked by"; "i"))) // null) as $s
-      | if $s == null then true
-        else
-          ($l[$s + 1:]) as $rest
-          | (first(range(0; $rest | length) | select($rest[.] | test("^#"))) // ($rest | length)) as $e
-          | [$rest[:$e][] | match("[0-9]+"; "g") | .string | tonumber]
-          | all(.[]; . as $n | $open | index($n) | not)
-        end))'
+  jq -c 'map(select(.issue_dependencies_summary.blocked_by == 0))'
+}
+
+# All open issues (pull requests dropped) via the REST API, which — unlike `gh issue list` —
+# carries `issue_dependencies_summary`. rc 1 when GitHub could not answer: callers must not
+# mistake that for "no issues", or every blocker would silently vanish.
+ralph_open_issues() {
+  local out
+  out=$(gh api --paginate "repos/{owner}/{repo}/issues?state=open&per_page=100" 2>/dev/null) || return 1
+  jq -s -c 'add // [] | map(select(.pull_request | not)
+    | {number, title, body, labels, issue_dependencies_summary})' <<<"$out"
+}
+
+# Open blockers of issue $1 as "#7, #9"; nothing when it has none; "?" when GitHub could not
+# answer (diagnostics only, so it must not abort the caller).
+ralph_open_blockers() {
+  local out
+  out=$(gh api --paginate "repos/{owner}/{repo}/issues/$1/dependencies/blocked_by" 2>/dev/null) \
+    || { echo "?"; return 0; }
+  jq -s -r 'add // [] | map(select(.state == "open") | "#\(.number)") | join(", ")' <<<"$out"
+}
+
+# stdin: issues array. One line per issue: "  #3 ← #7, #9" (its open blockers).
+ralph_blocked_report() {
+  local n
+  for n in $(jq -r '.[].number'); do
+    printf '  #%s ← %s\n' "$n" "$(ralph_open_blockers "$n")"
+  done
 }
 
 # Pure decision: should the loop mark an epic for acceptance? $1: total sub-issues, $2: open
