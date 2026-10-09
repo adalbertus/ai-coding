@@ -32,6 +32,10 @@ Use {SKILL_TDD} to complete the task. Keep risky logic (parsing, the data layer,
 date math) in isolated, unit-testable modules, following this repo's conventions. Where
 {SKILL_TDD} asks you to confirm seams, ask the human.
 
+If the issue has a `## Przypadki do przetestowania` section, write one test per listed case,
+named so the case is recognisable, asserting the expected outcome the case states. Tell the
+human about any case you cannot cover with a test.
+
 # FEEDBACK LOOPS, DOC-SYNC, COMMIT
 
 Same rules as an unattended run. Before committing, run the feedback loops declared in `## Ralph`

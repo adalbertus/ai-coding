@@ -125,7 +125,7 @@ expect_eq "mode: similar label is not ready-for-agent" \
 # being tuned against context measurements, and every version has to be visible in git history.
 # A deliberate change to either means regenerating them: UPDATE_GOLDEN=1 bash ralph/test/lib.test.sh
 GOLDEN_DIR="$SCRIPT_DIR/golden"
-for prompt_file in prompt prompt-hitl prompt-local; do
+for prompt_file in prompt prompt-hitl prompt-local prompt-review; do
   for runtime in claude codex; do
     golden="$GOLDEN_DIR/$prompt_file.$runtime.md"
     rendered=$(ralph_render_prompt "$runtime" "$SCRIPT_DIR/../$prompt_file.md")
@@ -152,7 +152,18 @@ for prompt_file in prompt prompt-hitl prompt-local; do
 done
 
 ralph_model_for_complexity claude heavy
-expect_eq "Claude heavy model" "$RALPH_MODEL/$RALPH_EFFORT" "opus/high"
+expect_eq "Claude heavy: the normal-tier model at high effort (ADR 0016)" "$RALPH_MODEL/$RALPH_EFFORT" "sonnet/high"
+
+RALPH_CODEX_MODEL_NORMAL="gpt-normal" RALPH_CODEX_MODEL_HEAVY="gpt-heavy" ralph_model_for_complexity codex heavy
+expect_eq "Codex heavy: implemented by the normal model, high reasoning" "$RALPH_MODEL/$RALPH_EFFORT" "gpt-normal/high"
+
+ralph_review_model claude
+expect_eq "Claude przegląd heavy model" "$RALPH_REVIEW_MODEL/$RALPH_REVIEW_EFFORT" "opus/high"
+RALPH_CODEX_MODEL_HEAVY="gpt-heavy" ralph_review_model codex
+expect_eq "Codex przegląd heavy uses the heavy model" "$RALPH_REVIEW_MODEL/$RALPH_REVIEW_EFFORT" "gpt-heavy/high"
+RALPH_FORCE_MODEL=sonnet ralph_review_model claude
+expect_eq "--force-model does not touch the przegląd model" "$RALPH_REVIEW_MODEL" "opus"
+RALPH_FORCE_MODEL=""
 
 ralph_model_for_complexity claude trivial
 expect_eq "Claude trivial stays on a model with auto mode (not Haiku)" "$RALPH_MODEL/$RALPH_EFFORT" "sonnet/low"
@@ -786,6 +797,88 @@ expect_eq "pick epic: none started -> lowest with open sub-issues" \
   "$(ralph_pick_epic <<<'[{"number":5,"started":false,"open":[50]},{"number":4,"started":false,"open":[40]}]')" "4"
 expect_eq "pick epic: nothing open -> empty" "$(ralph_pick_epic <<<'[{"number":3,"started":true,"open":[]}]')" ""
 expect_eq "pick epic: no epics -> empty" "$(ralph_pick_epic <<<'[]')" ""
+
+expect_eq "decision: 7 (przegląd sent the issue back once) -> continue" "$(dec 7 1 5 false)" "continue"
+expect_eq "decision: 7 at the limit -> stop-limit" "$(dec 7 5 5 false)" "stop-limit"
+
+# --- Przegląd heavy (ADR 0016): verdict, action, report and cost from a stream log ---
+expect_eq "verdict: OK line" "$(printf 'REVIEW: OK\n- case 1: test_x\n' | ralph_review_verdict)" "OK"
+expect_eq "verdict: preamble, then a bolded FAIL" "$(printf 'Checked.\n**REVIEW: FAIL**\n- gap\n' | ralph_review_verdict)" "FAIL"
+expect_eq "verdict: first verdict line wins" "$(printf 'REVIEW: FAIL\nREVIEW: OK\n' | ralph_review_verdict)" "FAIL"
+expect_eq "verdict: OKAY is not OK" "$(printf 'REVIEW: OKAY\n' | ralph_review_verdict)" ""
+expect_eq "verdict: mid-line mention is not a verdict" "$(printf 'I would say REVIEW: OK\n' | ralph_review_verdict)" ""
+expect_eq "verdict: none" "$(printf 'no verdict here\n' | ralph_review_verdict)" ""
+expect_eq "review action: OK -> ok" "$(ralph_review_action OK 0)" "ok"
+expect_eq "review action: first FAIL -> retry" "$(ralph_review_action FAIL 0)" "retry"
+expect_eq "review action: second FAIL -> stop" "$(ralph_review_action FAIL 1)" "stop"
+expect_eq "review action: OK after a FAIL -> ok" "$(ralph_review_action OK 1)" "ok"
+expect_eq "review action: no verdict -> error" "$(ralph_review_action '' 0)" "error"
+
+review_log=$(mktemp)
+cat > "$review_log" <<'JSONL'
+{"type":"system","subtype":"init","session_id":"s1"}
+{"type":"result","is_error":false,"num_turns":3,"result":"first\nREVIEW: FAIL","total_cost_usd":0.1234}
+not json
+{"type":"result","is_error":false,"num_turns":1,"result":"REVIEW: OK\n- case: test_a","total_cost_usd":0.4567}
+{"type":"result","is_error":true,"num_turns":1,"result":"limit","total_cost_usd":0.4567}
+JSONL
+expect_eq "last report (Claude): last non-error result" "$(ralph_last_report claude "$review_log")" "REVIEW: OK
+- case: test_a"
+expect_eq "run cost (Claude): max total_cost_usd, rounded" "$(ralph_run_cost claude "$review_log")" '$0.46'
+printf '%s\n' '{"type":"result","result":"x"}' > "$review_log"
+expect_eq "run cost (Claude): no cost data -> empty" "$(ralph_run_cost claude "$review_log")" ""
+cat > "$review_log" <<'JSONL'
+{"type":"item.completed","item":{"type":"agent_message","text":"working"}}
+{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":40,"output_tokens":7}}
+{"type":"item.completed","item":{"type":"agent_message","text":"REVIEW: FAIL\n- gap"}}
+{"type":"turn.completed","usage":{"input_tokens":50,"cached_input_tokens":10,"output_tokens":3}}
+JSONL
+expect_eq "last report (Codex): last agent message" "$(ralph_last_report codex "$review_log")" "REVIEW: FAIL
+- gap"
+expect_eq "run cost (Codex): summed tokens" "$(ralph_run_cost codex "$review_log")" "tokeny: wejście 150 (w tym cache 50), wyjście 10"
+rm -f "$review_log"
+
+# ralph_heavy_review end to end, with the worker and gh stubbed in this shell: what it does on
+# GitHub for each verdict, and the exit code it hands back to once.sh.
+review_case() {
+  # Not `local report`: ralph_heavy_review has locals of that name, which the stubs would see.
+  local rc_report="$1" rc_prior="$2"
+  (
+    SCRIPT_DIR="$SCRIPT_DIR/.."
+    gh_calls=$(mktemp)
+    ralph_run_worker() {
+      RALPH_LAST_LOG=$(mktemp)
+      jq -c -n --arg r "$rc_report" '{type:"result",is_error:false,num_turns:2,result:$r,total_cost_usd:0.2}' > "$RALPH_LAST_LOG"
+    }
+    gh() {
+      if [ "$1" = api ]; then
+        if [ "$rc_prior" -gt 0 ]; then jq -c -n --arg m "$RALPH_REVIEW_FAIL_MARKER" '[{body: ($m + "\nold")}]'; else echo '[]'; fi
+      else
+        echo "$1 $2 $3" >> "$gh_calls"; printf '%s\n' "$*" >> "$gh_calls.full"
+      fi
+    }
+    ralph_heavy_review claude 12 abc123 "## Issue #12: t" >/dev/null
+    printf '%s|' "${RALPH_REVIEW_EXIT:-none}"
+    tr '\n' ';' < "$gh_calls"
+    grep -q -F "$RALPH_REVIEW_FAIL_MARKER" "$gh_calls.full" && printf 'marker'
+    rm -f "$gh_calls" "$gh_calls.full"
+  )
+}
+notes_case() {
+  (
+    gh() { jq -c -n --arg m "$RALPH_REVIEW_FAIL_MARKER" '[{body: ($m + "\nfirst")}, {body: "other"}, {body: ($m + "\nsecond\n- a")}]'; }
+    printf '%s|%s' "$(ralph_review_notes 5)" "$(ralph_review_fail_count 5)"
+  )
+}
+expect_eq "review notes: the latest failed przegląd, marker stripped; count of failures" "$(notes_case)" "second
+- a|2"
+expect_eq "heavy review: OK -> accepted, one comment" "$(review_case 'REVIEW: OK' 0)" "none|issue comment 12;"
+expect_eq "heavy review: first FAIL -> reopen + label + marked comment, retry code" \
+  "$(review_case $'REVIEW: FAIL\n- gap' 0)" "7|issue reopen 12;issue edit 12;issue comment 12;marker"
+expect_eq "heavy review: second FAIL -> reopen, AFK-failed code" \
+  "$(review_case $'REVIEW: FAIL\n- gap' 1)" "3|issue reopen 12;issue edit 12;issue comment 12;marker"
+expect_eq "heavy review: no verdict -> reopen without the marker, error code" \
+  "$(review_case 'I could not decide' 0)" "1|issue reopen 12;issue edit 12;issue comment 12;"
 
 echo
 echo "Wynik: $pass OK, $fail FAIL"

@@ -89,7 +89,7 @@ while :; do
       finish "$RALPH_EXIT_DONE" "Ralph: epic #${epic} gotowy" "Epic #${epic} gotowy do odbioru." ;;
     stop-afk-failed)
       finish "$RALPH_EXIT_AFK_FAILED" "Ralph: porażka AFK" \
-"Issue #${issue:-?} (epic #${epic}) nie zostało domknięte i nadal ma ready-for-agent — porażka, bez pomijania. Zobacz komentarz workera w tym issue (gh issue view ${issue:-?} --comments) i logi w .git/ralph-logs/." ;;
+"Issue #${issue:-?} (epic #${epic}) nie zostało domknięte i nadal ma ready-for-agent — porażka, bez pomijania. Zobacz komentarz workera albo przeglądu heavy w tym issue (gh issue view ${issue:-?} --comments) i logi w .git/ralph-logs/." ;;
     stop-hitl)
       finish "$RALPH_EXIT_HITL_OPEN" "Ralph: HITL nierozwiązane" \
 "Sesja HITL dla issue #${issue:-?} (epic #${epic}) skończyła się bez rozwiązania. Rozstrzygnij je (domknij albo przywróć ready-for-agent) i uruchom ralph-epic ponownie." ;;

@@ -269,13 +269,15 @@ ralph_model_for_complexity() {
   RALPH_EFFORT=""
 
   case "$runtime:$complexity" in
-    claude:heavy)   RALPH_MODEL="opus"; RALPH_EFFORT="high" ;;
+    # heavy: the normal-tier model at high effort; the stronger model only reviews the result
+    # afterwards (ralph_review_model, ADR 0016).
+    claude:heavy)   RALPH_MODEL="sonnet"; RALPH_EFFORT="high" ;;
     # Not Haiku: the worker needs auto mode, which Claude Code does not offer on Haiku; without
     # it every Bash call waits for approval and the AFK loop stalls.
     claude:trivial) RALPH_MODEL="sonnet"; RALPH_EFFORT="low" ;;
     claude:*)       RALPH_MODEL="sonnet"; RALPH_EFFORT="medium" ;;
 
-    codex:heavy)   RALPH_MODEL="${RALPH_CODEX_MODEL_HEAVY:-${RALPH_CODEX_MODEL:-}}"; RALPH_EFFORT="${RALPH_CODEX_EFFORT_HEAVY:-high}" ;;
+    codex:heavy)   RALPH_MODEL="${RALPH_CODEX_MODEL_NORMAL:-${RALPH_CODEX_MODEL:-}}"; RALPH_EFFORT="${RALPH_CODEX_EFFORT_HEAVY:-high}" ;;
     codex:trivial) RALPH_MODEL="${RALPH_CODEX_MODEL_TRIVIAL:-${RALPH_CODEX_MODEL:-}}"; RALPH_EFFORT="${RALPH_CODEX_EFFORT_TRIVIAL:-low}" ;;
     codex:*)       RALPH_MODEL="${RALPH_CODEX_MODEL_NORMAL:-${RALPH_CODEX_MODEL:-}}"; RALPH_EFFORT="${RALPH_CODEX_EFFORT_NORMAL:-medium}" ;;
   esac
@@ -285,6 +287,16 @@ ralph_model_for_complexity() {
     RALPH_MODEL="$RALPH_FORCE_MODEL"
     RALPH_EFFORT="high"
   fi
+}
+
+# The model for the przegląd heavy: the runtime's strongest tier. Not affected by --force-model —
+# the review follows the label alone.
+ralph_review_model() {
+  local runtime="$1"
+  case "$runtime" in
+    codex) RALPH_REVIEW_MODEL="${RALPH_CODEX_MODEL_HEAVY:-${RALPH_CODEX_MODEL:-}}"; RALPH_REVIEW_EFFORT="${RALPH_CODEX_EFFORT_REVIEW:-high}" ;;
+    *)     RALPH_REVIEW_MODEL="opus"; RALPH_REVIEW_EFFORT="high" ;;
+  esac
 }
 
 ralph_model_display() {
@@ -345,6 +357,7 @@ RALPH_RENDER_JQ_DEFS='
 ralph_render_stream() {
   { cat; printf '%s\n' '{"type":"ralph_eof"}'; } |
   jq -n -R --unbuffered -r --arg cwd "$PWD/" --arg color "${RALPH_COLOR:-0}" \
+    --arg title "${RALPH_REPORT_TITLE:-Raport workera}" \
     --argjson w "$(ralph_term_cols)" "$RALPH_RENDER_JQ_DEFS"'
     def flush: if .text then .out += [.text | narr] | .text = null else . end;
     def task($id): .tasks[$id] // "";
@@ -357,7 +370,7 @@ ralph_render_stream() {
           "\n" + ("── Worker przerwany ──\n" + $last.text | paint("31"))
         else
           (([.results[] | select((.err | not) and .turns > 1)] | last) // $last) as $r
-          | "\n── Raport workera ──\n" + $r.text
+          | "\n── " + $title + " ──\n" + $r.text
         end;
     foreach (inputs | (fromjson? // empty)) as $e (
       {text: null, out: [], bg: 0, tasks: {}, bgids: {}, results: [], limit: "allowed"};
@@ -431,10 +444,11 @@ ralph_stream_session_id() {
 # Claude worker, unattended: `claude -p` in auto mode with a streamed JSON transcript. The
 # full stream lands in <git dir>/ralph-logs/ (outside the work tree, so `git status` stays
 # clean); the screen gets one line per step plus the final summary; the run ends with the
-# `claude --resume <id>` line. $4 labels the log file (issue-<n>, `local`).
+# `claude --resume <id>` line. $4 labels the log file (issue-<n>, `local`). $5 = `readonly`
+# takes away the file-editing tools (przegląd heavy). The log path is left in RALPH_LAST_LOG.
 ralph_run_claude_worker() {
-  local model="$1" effort="$2" prompt="$3" label="${4:-run}"
-  local dir log rc id
+  local model="$1" effort="$2" prompt="$3" label="${4:-run}" access="${5:-}"
+  local dir log rc id deny=()
   dir=$(git rev-parse --git-path ralph-logs 2>/dev/null) || dir=""
   if [ -n "$dir" ] && mkdir -p "$dir" 2>/dev/null; then
     log="$dir/$(date +%Y%m%d-%H%M%S)-${label}.jsonl"
@@ -442,7 +456,10 @@ ralph_run_claude_worker() {
     log=$(mktemp)
   fi
 
-  claude -p --permission-mode auto --output-format stream-json --verbose \
+  RALPH_LAST_LOG="$log"
+  # --disallowedTools is variadic: it must be followed by another option, never by the prompt.
+  [ "$access" = readonly ] && deny=(--disallowedTools Edit Write NotebookEdit)
+  claude -p ${deny[@]+"${deny[@]}"} --permission-mode auto --output-format stream-json --verbose \
     --model "$model" --effort "$effort" "$prompt" \
     | tee "$log" | ralph_render_stream
   rc=${PIPESTATUS[0]}
@@ -463,6 +480,7 @@ ralph_run_claude_worker() {
 # are rendered on completion.
 ralph_render_codex_stream() {
   jq -n -R --unbuffered -r --arg cwd "$PWD/" --arg color "${RALPH_COLOR:-0}" \
+    --arg title "${RALPH_REPORT_TITLE:-Raport workera}" \
     --argjson w "$(ralph_term_cols)" "$RALPH_RENDER_JQ_DEFS"'
     def flush: if .last != null then .out += [.last | narr] | .last = null else . end;
     foreach (inputs | (fromjson? // empty)) as $e ({last: null, out: []};
@@ -487,7 +505,7 @@ ralph_render_codex_stream() {
               flush | .out += ["▸ WebSearch: \(($i.query // "") | line1)" | step]
             else . end
         elif $e.type == "turn.completed" and .last != null then
-          .out += ["\n── Raport workera ──\n" + .last] | .last = null
+          .out += ["\n── " + $title + " ──\n" + .last] | .last = null
         else . end;
       .out[])'
 }
@@ -499,7 +517,9 @@ ralph_codex_thread_id() {
 
 # Codex worker, unattended: `codex exec --json` with auto-review. Same shape as the Claude
 # worker: full JSONL in <git dir>/ralph-logs/, one line per step on screen, a resume line at the
-# end. The session is persisted (no --ephemeral) so it can be resumed.
+# end. The session is persisted (no --ephemeral) so it can be resumed. $5 is accepted for
+# symmetry with the Claude worker but not enforced: a read-only sandbox would also stop the
+# przegląd from running tests, so its prompt alone forbids edits. Log path -> RALPH_LAST_LOG.
 ralph_run_codex_worker() {
   local model="$1" effort="$2" prompt="$3" label="${4:-run}"
   local dir log rc id
@@ -516,6 +536,7 @@ ralph_run_codex_worker() {
   # stderr carries Codex's banner and its tool errors (e.g. a tool host that fails to start),
   # which never reach the JSONL: keep it next to the log instead of discarding it.
   local err="${log%.jsonl}.stderr.log"
+  RALPH_LAST_LOG="$log"
   codex "${args[@]}" "$prompt" 2>"$err" \
     | tee "$log" | ralph_render_codex_stream
   rc=${PIPESTATUS[0]}
@@ -563,23 +584,25 @@ ralph_run_claude_interactive() {
   fi
 }
 
-# $6: mode, `afk` (default, unattended) or `hitl` (interactive session with a human present).
+# $6: mode, `afk` (default, unattended), `hitl` (interactive session with a human present) or
+# `review` (unattended, without file-editing tools: the przegląd heavy).
 ralph_run_worker() {
-  local runtime="$1" model="$2" effort="$3" prompt="$4" label="${5:-}" mode="${6:-afk}"
+  local runtime="$1" model="$2" effort="$3" prompt="$4" label="${5:-}" mode="${6:-afk}" access=""
+  [ "$mode" = review ] && access=readonly
 
   case "$runtime" in
     claude)
       if [ "$mode" = "hitl" ]; then
         ralph_run_claude_interactive "$model" "$effort" "$prompt"
       else
-        ralph_run_claude_worker "$model" "$effort" "$prompt" "$label"
+        ralph_run_claude_worker "$model" "$effort" "$prompt" "$label" "$access"
       fi
       ;;
     codex)
       if [ "$mode" = "hitl" ]; then
         ralph_run_codex_interactive "$model" "$effort" "$prompt"
       else
-        ralph_run_codex_worker "$model" "$effort" "$prompt" "$label"
+        ralph_run_codex_worker "$model" "$effort" "$prompt" "$label" "$access"
       fi
       ;;
     *)
@@ -765,6 +788,7 @@ RALPH_EXIT_AFK_FAILED=3  # AFK run left the issue open, still ready-for-agent
 RALPH_EXIT_DISCOVERED=4  # AFK run left it open without ready-for-agent (discovered HITL)
 RALPH_EXIT_HITL_OPEN=5   # HITL session ended, issue open without ready-for-agent
 RALPH_EXIT_HITL_TO_AFK=6 # HITL session ended, issue open with ready-for-agent restored
+RALPH_EXIT_REVIEW_RETRY=7 # przegląd heavy failed once: issue reopened for one fix
 
 # $1: exit code of a finished worker run (from ralph_run_outcome); $2: issue number -> the
 # one-line verdict, coloured: green done, orange waiting for a human, red failure.
@@ -776,6 +800,7 @@ ralph_outcome_message() {
     "$RALPH_EXIT_AFK_FAILED") ralph_say err "✗ Issue #${num} nie zostało domknięte (nadal ma ready-for-agent)." ;;
     "$RALPH_EXIT_DISCOVERED") ralph_say warn "⚠ Issue #${num} wymaga człowieka: worker zdjął ready-for-agent (odkryty HITL)." ;;
     "$RALPH_EXIT_HITL_OPEN") ralph_say warn "⚠ Sesja HITL skończona, issue #${num} nadal otwarte bez ready-for-agent." ;;
+    "$RALPH_EXIT_REVIEW_RETRY") ralph_say warn "⚠ Przegląd odrzucił issue #${num} — otwarte ponownie, poprawka w następnej iteracji." ;;
     *) ralph_say err "✗ Nie udało się odczytać stanu issue #${num} po runie." ;;
   esac
 }
@@ -795,6 +820,115 @@ ralph_run_outcome() {
   else
     if [ "$label" = true ]; then echo "$RALPH_EXIT_AFK_FAILED"; else echo "$RALPH_EXIT_DISCOVERED"; fi
   fi
+}
+
+# --- Przegląd heavy (ADR 0016): a stronger model reviews a closed heavy sub-issue. ---
+
+# Marks a failed przegląd's comment; counting them is how a second failure is recognised.
+RALPH_REVIEW_FAIL_MARKER='<!-- ralph-przeglad: FAIL -->'
+
+# Pure. stdin: the reviewer's report -> OK, FAIL, or nothing when it gave no verdict. The first
+# `REVIEW: OK|FAIL` line counts, so a preamble before it does no harm.
+ralph_review_verdict() {
+  sed -n -E 's/^[[:space:]*`]*REVIEW:[[:space:]]*(OK|FAIL)([^[:alnum:]].*)?$/\1/p' | head -1
+}
+
+# Pure. $1: verdict (OK|FAIL|empty), $2: failed przeglądy of this issue before this one -> ok
+# (accept), retry (reopen for one fix), stop (second failure: reopen, stop for a human) or
+# error (no verdict: reopen, the run fails rather than accept unreviewed work).
+ralph_review_action() {
+  case "$1" in
+    OK) echo ok ;;
+    FAIL) if [ "${2:-0}" -ge 1 ]; then echo stop; else echo retry; fi ;;
+    *) echo error ;;
+  esac
+}
+
+# Pure. $1: runtime, $2: a worker's stream log -> its final report text (Claude: the last
+# non-error `result`; Codex: the last agent message).
+ralph_last_report() {
+  case "$1" in
+    codex) jq -R 'fromjson? // empty' "$2" 2>/dev/null \
+             | jq -s -r '[.[] | select(.type == "item.completed" and .item.type == "agent_message") | .item.text] | last // ""' ;;
+    *)     jq -R 'fromjson? // empty' "$2" 2>/dev/null \
+             | jq -s -r '[.[] | select(.type == "result" and .is_error != true) | .result] | last // ""' ;;
+  esac
+}
+
+# Pure. $1: runtime, $2: a worker's stream log -> what the run cost, for a human, or nothing when
+# the log carries no such data. Claude reports `total_cost_usd` per `result`; it is cumulative
+# for the session, and max never double-counts either way. Codex reports tokens per turn.
+ralph_run_cost() {
+  case "$1" in
+    codex) jq -R 'fromjson? // empty' "$2" 2>/dev/null | jq -s -r '
+             [.[] | select(.type == "turn.completed") | .usage // empty]
+             | if length == 0 then "" else
+                 "tokeny: wejście \(map(.input_tokens // 0) | add) (w tym cache \(map(.cached_input_tokens // 0) | add)), wyjście \(map(.output_tokens // 0) | add)"
+               end' ;;
+    *)     jq -R 'fromjson? // empty' "$2" 2>/dev/null | jq -s -r '
+             [.[] | select(.type == "result") | .total_cost_usd // empty] | max
+             | if . == null then "" else "$" + ((. * 100 | round) / 100 | tostring) end' ;;
+  esac
+}
+
+# Failed przeglądy recorded on issue $1 so far; 0 when GitHub cannot answer.
+ralph_review_fail_count() {
+  gh api --paginate "repos/{owner}/{repo}/issues/$1/comments" 2>/dev/null \
+    | jq -s --arg m "$RALPH_REVIEW_FAIL_MARKER" '[add // [] | .[] | select(.body | contains($m))] | length' 2>/dev/null \
+    || echo 0
+}
+
+# The latest failed przegląd's comment on issue $1 (without the marker), or nothing. The worker
+# gets it with the issue: the issue body alone would not tell it what to fix.
+ralph_review_notes() {
+  gh api --paginate "repos/{owner}/{repo}/issues/$1/comments" 2>/dev/null \
+    | jq -s -r --arg m "$RALPH_REVIEW_FAIL_MARKER" \
+        '[add // [] | .[] | select(.body | contains($m)) | .body] | last // "" | sub($m; "") | gsub("^\\s+|\\s+$"; "")' 2>/dev/null
+}
+
+# Runs the przegląd heavy of closed issue $2 over the commits $3..HEAD, then acts on the verdict.
+# $1: runtime, $4: the issue as the worker got it. Leaves in RALPH_REVIEW_EXIT the exit code
+# once.sh should report instead of the issue's state, or nothing when the przegląd accepted it.
+ralph_heavy_review() {
+  local runtime="$1" num="$2" base="$3" issue="$4" prompt report verdict prior action cost body
+  RALPH_REVIEW_EXIT=""
+  ralph_review_model "$runtime"
+  prompt=$(ralph_render_prompt "$runtime" "$SCRIPT_DIR/prompt-review.md")
+  ralph_say dim "Przegląd heavy issue #${num} na $(ralph_model_display "$runtime" "$RALPH_REVIEW_MODEL" "$RALPH_REVIEW_EFFORT")..."
+  RALPH_LAST_LOG=""
+  RALPH_REPORT_TITLE="Raport przeglądu" ralph_run_worker "$runtime" "$RALPH_REVIEW_MODEL" "$RALPH_REVIEW_EFFORT" \
+    "Issue under review: $issue Commit range to review: ${base}..HEAD $prompt" "review-${num}" review
+  report=""; [ -n "$RALPH_LAST_LOG" ] && report=$(ralph_last_report "$runtime" "$RALPH_LAST_LOG")
+  cost=""; [ -n "$RALPH_LAST_LOG" ] && cost=$(ralph_run_cost "$runtime" "$RALPH_LAST_LOG")
+  [ -n "$cost" ] && ralph_say dim "Koszt przeglądu: $cost"
+  verdict=$(ralph_review_verdict <<<"$report")
+  prior=$(ralph_review_fail_count "$num")
+  action=$(ralph_review_action "$verdict" "$prior")
+  case "$action" in
+    ok)
+      ralph_say ok "✓ Przegląd heavy przyjął issue #${num}."
+      gh issue comment "$num" --body "Przegląd heavy: OK.
+
+$report" >/dev/null 2>&1
+      return 0 ;;
+    retry|stop)
+      body="${RALPH_REVIEW_FAIL_MARKER}
+Przegląd heavy odrzucił implementację (próba $((prior + 1)) z 2).
+
+$report" ;;
+    *)
+      body="Przegląd heavy nie dał werdyktu (brak linii REVIEW: OK / REVIEW: FAIL) — issue wraca do pętli bez akceptacji. Log: ${RALPH_LAST_LOG:-brak}" ;;
+  esac
+  gh issue reopen "$num" >/dev/null 2>&1
+  gh issue edit "$num" --add-label ready-for-agent >/dev/null 2>&1
+  gh issue comment "$num" --body "$body" >/dev/null 2>&1
+  case "$action" in
+    retry) RALPH_REVIEW_EXIT="$RALPH_EXIT_REVIEW_RETRY" ;;
+    stop)  ralph_say err "✗ Przegląd heavy odrzucił issue #${num} drugi raz — zatrzymuję, potrzebny człowiek."
+           RALPH_REVIEW_EXIT="$RALPH_EXIT_AFK_FAILED" ;;
+    *)     ralph_say err "✗ Przegląd heavy issue #${num} nie dał werdyktu — otwieram issue ponownie."
+           RALPH_REVIEW_EXIT="$RALPH_EXIT_ERROR" ;;
+  esac
 }
 
 # Pure. stdin: issues array as the REST API returns it (with `issue_dependencies_summary`).
@@ -906,7 +1040,7 @@ ralph_epic_decision() {
     "$RALPH_EXIT_ERROR") echo stop-error; return 0 ;;
     "$RALPH_EXIT_AFK_FAILED") echo stop-afk-failed; return 0 ;;
     "$RALPH_EXIT_HITL_OPEN") echo stop-hitl; return 0 ;;
-    "$RALPH_EXIT_DONE"|"$RALPH_EXIT_NOTHING"|"$RALPH_EXIT_DISCOVERED"|"$RALPH_EXIT_HITL_TO_AFK") ;;
+    "$RALPH_EXIT_DONE"|"$RALPH_EXIT_NOTHING"|"$RALPH_EXIT_DISCOVERED"|"$RALPH_EXIT_HITL_TO_AFK"|"$RALPH_EXIT_REVIEW_RETRY") ;;
     *) echo stop-error; return 0 ;;
   esac
   if [ "$ready" = true ]; then echo stop-ready; return 0; fi

@@ -1,6 +1,6 @@
 ---
 name: to-issues-ralph
-description: Turn a finished grill into a published Ralph-loop epic in one non-interactive run — publishes the PRD as a parent `[PRD]` issue with an acceptance scenario (`## Jak odebrać`), breaks it into vertical slices published as native sub-issues of that epic, then adds complexity triage per sub-issue. Asks no questions. Every piece of work is an epic, even a one-line change. Use after a grill session to convert a plan/PRD into issues the Ralph autonomous loop (ralph/once.sh) will implement, or when the user mentions Ralph, epic, complexity triage, or per-issue model selection.
+description: Turn a finished grill into a published Ralph-loop epic in one non-interactive run — publishes the PRD as a parent `[PRD]` issue with an acceptance scenario (`## Jak odebrać`), breaks it into vertical slices published as native sub-issues of that epic, then adds complexity triage per sub-issue — and, for each heavy one, the list of cases its tests must cover. Asks no questions. Every piece of work is an epic, even a one-line change. Use after a grill session to convert a plan/PRD into issues the Ralph autonomous loop (ralph/once.sh) will implement, or when the user mentions Ralph, epic, complexity triage, or per-issue model selection.
 ---
 
 # To Issues (Ralph)
@@ -58,15 +58,32 @@ checkpoints. Delegating (not copying) means upstream changes keep working here.
 4. **Triage complexity.** Add **exactly one** `complexity:*` label to each **sub-issue**
    (never to the epic), using the rubric below. Create the label first if the repo lacks it:
    ```bash
-   gh label create complexity:heavy   --color B60205 --description "Highest-capability model" 2>/dev/null
+   gh label create complexity:heavy   --color B60205 --description "Case list + review by the strongest model" 2>/dev/null
    gh label create complexity:normal  --color FBCA04 --description "Default model" 2>/dev/null
    gh label create complexity:trivial --color 0E8A16 --description "Cheapest model — mechanical only" 2>/dev/null
    gh issue edit <n> --add-label complexity:<tier>
    ```
 
-5. **Record why (heavy only).** For a `complexity:heavy` sub-issue, insert a `## Complexity`
-   section directly before `## Blocked by`, holding one line that states why (e.g. "heavy —
-   touches tenant-isolation logic").
+5. **Write the case list (heavy only).** For each `complexity:heavy` sub-issue, first read the
+   code the slice will touch — where the check, rule or calculation lives today and every entry
+   point that reaches it — then insert a `## Przypadki do przetestowania` section directly
+   before `## Blocked by`. Open it with one line stating why the slice is heavy (e.g. "heavy —
+   touches tenant-isolation logic"), then list the cases, one bullet each, as
+   `situation → expected outcome`, concrete enough to become a test with no further judgment:
+   ```markdown
+   ## Przypadki do przetestowania
+
+   heavy — touches tenant-isolation logic.
+
+   - user of tenant A, `GET /orders/{id of tenant B}` → 404, not 403 (no existence leak)
+   - user of tenant A, `GET /orders` → only tenant A's orders, also when B has more
+   - order id that does not exist → 404, same body as the cross-tenant case
+   ```
+   Cover what makes the slice heavy: the boundaries, the second path around the check, the
+   error path. Describe behaviour, never file names or test code — the worker writes the
+   tests, and a stronger model reviews them against this list after the worker closes the
+   issue. Always write the list; when the code leaves a case uncertain, write your best case
+   and say what is uncertain.
 
 End the turn only here, with the epic (number, title) followed by one line per sub-issue:
 number, title, tier, blockers.
@@ -76,7 +93,7 @@ number, title, tier, blockers.
 The label encodes intrinsic complexity, NOT a model name. Complexity here means one precise
 thing: **would a stronger model materially change the outcome?** — the difficulty of getting
 the implementation *right*, not the blast radius of getting it *wrong*. Those axes are
-orthogonal, and only the first justifies a pricier model. The complexity→model mapping lives
+orthogonal, and only the first justifies spending a stronger model (as reviewer — see `heavy`). The complexity→model mapping lives
 only in `ralph/once.sh`; never put a model name in the label.
 
 **Blast radius is not complexity.** A wide-but-mechanical change (e.g. `ADD COLUMN … DEFAULT 0`
@@ -102,13 +119,14 @@ it — do not escalate the model to paper over a vague issue.** Sharpen before y
   gate plus human test. If a settled spec and the worker's own tests can close it, it is normal.
   Use this whenever you hesitate.
 
-- **`complexity:heavy`** — reserved for the one case where a stronger model genuinely pays back:
+- **`complexity:heavy`** — reserved for the one case where a green gate is not enough:
   **implementation correctness that a green gate would not prove.** Concretely, work where a
   plausible-but-wrong implementation would pass the tests the worker writes for itself —
   tenant-isolation / authorization / other security enforcement, or subtle logic (financial,
-  date/time, algorithmic) with easy-to-miss cases. The tell: a stronger model is more likely to
-  enumerate *what to test*, not merely to pass the obvious test. Nothing else — not size, not
-  blast radius, not a "run code-review before merging" note — is enough on its own.
+  date/time, algorithmic) with easy-to-miss cases. The tell: what matters is enumerating *what
+  to test*, not merely passing the obvious test. Nothing else — not size, not blast radius, not
+  a "run code-review before merging" note — is enough on its own. A heavy slice is answered
+  with a case list (step 5) and a review by a stronger model, not by a stronger implementer.
 
 ## Notes
 

@@ -208,7 +208,7 @@ triage skill rely on. Skip this entirely for local-files repos (those driven by
 ```bash
 gh label create ready-for-agent  --color 0E8A16 --description "AFK-ready: safe for the autonomous loop to pick up" 2>/dev/null
 gh label create needs-human-test --color 5319E7 --description "Epic awaiting human acceptance (parentless issue: awaiting verification)" 2>/dev/null
-gh label create complexity:heavy   --color B60205 --description "Highest-capability model" 2>/dev/null
+gh label create complexity:heavy   --color B60205 --description "Case list + review by the strongest model" 2>/dev/null
 gh label create complexity:normal  --color FBCA04 --description "Default model" 2>/dev/null
 gh label create complexity:trivial --color 0E8A16 --description "Cheapest model — mechanical only" 2>/dev/null
 ```

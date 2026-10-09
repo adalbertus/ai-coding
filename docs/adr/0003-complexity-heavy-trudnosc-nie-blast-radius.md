@@ -1,5 +1,7 @@
 # Rubryka `complexity`: `heavy` znaczy trudność implementacyjna, nie blast-radius
 
+Częściowo zastąpiony przez ADR 0016: znaczenie `heavy` obowiązuje, ale zdanie o niezmienionym mapowaniu `complexity → model` już nie.
+
 **Kontekst.** Jedna iteracja workera pętli Ralpha na tierze `heavy` (Opus) kosztuje ~15× tyle
 co `normal` (Sonnet). Dotychczasowa rubryka w `to-issues-ralph` nadawała `heavy` m.in. za
 blast-radius (migracja na współdzielonej tabeli), więc mechaniczne slice'y — np.

@@ -157,9 +157,23 @@ _Avoid_: folding it into the automated gate; the worker rewriting CONTEXT.md / A
 **complexity** (złożoność):
 A task's intrinsic difficulty — `trivial` / `normal` / `heavy` — meaning specifically whether a
 stronger model would change the *outcome*: the difficulty of getting the implementation right,
-not the blast radius of getting it wrong (only the former warrants a pricier model). The
+not the blast radius of getting it wrong (only the former warrants a stronger model — as the przegląd heavy, not the implementer). The
 complexity→model mapping lives only in the loop script, so labels stay stable as models change.
 _Avoid_: putting a model name in the label; conflating it with blast radius.
+
+**Lista przypadków** (test-case list):
+The section `## Przypadki do przetestowania` of a `heavy` sub-issue: concrete "situation →
+expected outcome" pairs written at breakdown, after reading the relevant code. It is the oracle
+the worker's tests are held to — one named test per case — so the worker does not get to decide
+alone what counts as tested.
+_Avoid_: prose acceptance criteria in its place; test code pasted into the issue.
+
+**Przegląd `heavy`** (heavy review):
+A run of a stronger model after the worker closes a `heavy` sub-issue: it judges only whether the
+diff's tests really cover the lista przypadków and whether the diff opens a case the list missed.
+It neither writes code nor judges style. Failing it reopens the sub-issue for one fix; a second
+failure stops the epic for a human.
+_Avoid_: "review" (clashes with `/code-review`); a przegląd that fixes code itself.
 
 **needs-human-test**:
 An epic whose sub-issues are all closed, awaiting odbiór — or, for a task with no epic, a task

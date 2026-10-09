@@ -20,6 +20,7 @@
 #   4  AFK run left the issue open without `ready-for-agent` (discovered HITL)
 #   5  HITL session ended, issue open without `ready-for-agent` (unresolved)
 #   6  HITL session ended, issue open with `ready-for-agent` restored (handed back to AFK)
+#   7  przegląd heavy failed once: the issue is reopened with its notes for one fix (ADR 0016)
 
 # Self-locate: this script + its sibling prompts/guard live together (in the shared ralph/
 # dir, reached via a symlink on PATH). `realpath` resolves that symlink so prompts are read
@@ -215,6 +216,16 @@ fi
 # 5. Stage 2 — implement ONLY the selected issue, on the chosen model.
 issue=$(gh issue view "$num" --json number,title,body \
   --jq '"## Issue #\(.number): \(.title)\n\n\(.body)\n"' 2>/dev/null)
+# A przegląd heavy that sent the issue back left its notes in a comment; the body does not
+# carry them, so hand the latest ones to the worker explicitly.
+review_notes=$(ralph_review_notes "$num")
+if [ -n "$review_notes" ]; then
+  issue="$issue
+### Notes from the failed przegląd heavy (fix these)
+
+$review_notes
+"
+fi
 # The mode follows from the issue: ready-for-agent -> unattended, otherwise an interactive HITL
 # session with its own prompt. Loop mode only ever selects ready-for-agent issues.
 mode=$(ralph_worker_mode <<<"$labels")
@@ -234,8 +245,23 @@ echo "Zaczynam implementację issue #${num} przez runtime ${RALPH_RUNTIME} na $(
 # a classifier vets each tool call for risk and prompt injection. Codex runs unattended too, via
 # `codex exec --json --approve-for-me` (see ralph_run_codex_worker). HITL issues (no ready-for-agent)
 # get the interactive CLI of either runtime instead.
+pre_head=$(git rev-parse HEAD 2>/dev/null)
+RALPH_LAST_LOG=""
 ralph_run_worker "$RALPH_RUNTIME" "$model" "$effort" \
   "Previous commits: $commits Issue to work (work ONLY this one): $issue $prompt" "issue-${num}" "$mode"
+if [ -n "$RALPH_LAST_LOG" ]; then
+  cost=$(ralph_run_cost "$RALPH_RUNTIME" "$RALPH_LAST_LOG")
+  [ -n "$cost" ] && ralph_say dim "Koszt workera: $cost"
+fi
+
+# 6. Przegląd heavy (ADR 0016): an AFK run that closed a heavy issue is reviewed by the stronger
+#    model before anything counts it as done — so before the epic can be marked for acceptance.
+#    It follows the label alone, --force-model included; a HITL session had a human present.
+RALPH_REVIEW_EXIT=""
+if [ "$mode" = afk ] && [ "$complexity" = heavy ] && [ -n "$pre_head" ] \
+    && [ "$(gh issue view "$num" --json state --jq '.state | ascii_downcase' 2>/dev/null)" = closed ]; then
+  ralph_heavy_review "$RALPH_RUNTIME" "$num" "$pre_head" "$issue"
+fi
 
 # The worker may have closed the last sub-issue of an epic: mark it for acceptance.
 ralph_mark_ready_epics
@@ -248,5 +274,6 @@ ralph_warn_dirty_tree
 state=$(gh issue view "$num" --json state --jq '.state | ascii_downcase' 2>/dev/null)
 has_label=$(gh issue view "$num" --json labels --jq 'any(.labels[]; .name == "ready-for-agent")' 2>/dev/null)
 outcome=$(ralph_run_outcome "$mode" "$state" "$has_label")
+[ -n "$RALPH_REVIEW_EXIT" ] && outcome="$RALPH_REVIEW_EXIT"
 ralph_outcome_message "$outcome" "$num"
 exit "$outcome"

@@ -195,6 +195,22 @@ Dwa flavoury, jeden zestaw promptów:
 `complexity:*`: każde issue jedzie na wskazanym modelu z effort high, także sesja HITL. Flaga może
 stać w dowolnym miejscu. Strażnik i selektor zostają na Haiku. Z Codeksem run odmawia startu.
 
+**`complexity:heavy`** nie oznacza już silniejszego implementera (ADR 0016). Issue implementuje
+model `normal` z effort high (Claude: Sonnet). Wyrocznią jest sekcja `## Przypadki do
+przetestowania`, którą `to-issues-ralph` pisze przy rozbiciu: worker pisze jeden test na każdy
+przypadek. Gdy przebieg AFK zamknie takie issue, `ralph-once` uruchamia **przegląd heavy**:
+silniejszy model (Claude: Opus, Codex: `RALPH_CODEX_MODEL_HEAVY`) czyta diff, może uruchamiać
+testy, nie zmienia kodu i nie dotyka GitHuba. Ocenia tylko, czy testy łapią błędną
+implementację przypadków z listy i czy diff nie otwiera przypadku spoza niej. Werdykt:
+- `REVIEW: OK` — issue zostaje zamknięte;
+- pierwszy `REVIEW: FAIL` — issue wraca otwarte z komentarzem przeglądu, worker dostaje go przy
+  poprawce, run kończy się kodem 7 i `ralph-epic` jedzie dalej;
+- drugi `REVIEW: FAIL` — issue wraca otwarte, `ralph-epic` staje jak przy porażce AFK;
+- brak werdyktu — issue wraca otwarte, run kończy się błędem.
+
+Przegląd zależy tylko od etykiety: działa też z `--force-model`, nie działa po sesji HITL. Po
+workerze i po przeglądzie run wypisuje koszt (`Koszt workera: $…`; Codex: tokeny).
+
 Przed wyborem zadania i workerem oba przechodzą przez **strażnika** (`ralph/preflight.sh`,
 fail-closed; w `ralph-once` po locku i bramce `needs-human-test`): repo musi mieć gotową sekcję
 `## Ralph` w natywnym pliku runtime'u (`CLAUDE.md` dla Claude, `AGENTS.md` dla Codex), inaczej
@@ -225,7 +241,8 @@ obu runtime'ów:
   `↻` gdy zadanie się skończyło i CLI obudziło workera. Nikt tu nie odpytuje: `claude -p` nie
   kończy się, dopóki działa zadanie w tle, i sam wznawia model po jego zakończeniu.
 - `⚠ Limit użycia blisko` (pomarańczowe) i `✗ Limit użycia wyczerpany` (czerwone).
-- Na końcu `── Raport workera ──` z podsumowaniem modelu, wypisany raz. Przy pracy w tle
+- Na końcu `── Raport workera ──` (u przeglądu heavy: `── Raport przeglądu ──`) z podsumowaniem
+  modelu, wypisany raz. Przy pracy w tle
   `claude -p` daje kilka wyników (jeden na turę, także odpowiedź na wygasły monitor); raportem
   jest ostatnia tura, w której worker coś robił. Sesja przerwana przez API (np. limit sesji) to
   czerwone `── Worker przerwany ──`.
@@ -310,8 +327,9 @@ zmiana (epic z jednym sub-issue). Terminologia: `CONTEXT.md` (**Epic**, **Odbió
    `## Ralph` do `CLAUDE.md` i `AGENTS.md`, tworzy labelki pętli na GitHubie.
 2. **`/to-issues-ralph` / `$to-issues-ralph`** — z planu/PRD publikuje epic (`[PRD]` z PRD i
    scenariuszem `## Jak odebrać`, label `ready-for-agent`) oraz sub-issues (vertical slices)
-   z natywnymi relacjami „blocked by” i triage `complexity:*`. Sub-issues nie mają sekcji
-   ręcznej — scenariusz jest jeden, w epicu.
+   z natywnymi relacjami „blocked by” i triage `complexity:*`; sub-issue `heavy` dostaje listę
+   przypadków do przetestowania. Sub-issues nie mają sekcji ręcznej — scenariusz jest jeden,
+   w epicu.
    Po tym kroku nie musisz nic robić poza uruchomieniem pętli.
 3. **`ralph-once`** (albo `ralph-once-local`) w pętli z terminala — implementacja AFK, jedno
    sub-issue na run.
@@ -352,12 +370,13 @@ runie, nie z wyniku procesu workera):
 | Kod | Znaczenie |
 |-----|-----------|
 | 0 | issue domknięte |
-| 1 | błąd lub odmowa: złe argumenty, brak issue, zajęty lock, strażnik, brudne drzewo, konflikt scalania |
+| 1 | błąd lub odmowa: złe argumenty, brak issue, zajęty lock, strażnik, brudne drzewo, konflikt scalania, przegląd heavy bez werdyktu |
 | 2 | nic do zrobienia: bramka `needs-human-test`, epic w odbiorze, brak lub zablokowani kandydaci, `NO_TASK` |
-| 3 | run AFK zostawił issue otwarte i nadal z `ready-for-agent` (porażka, praca niedokończona) |
+| 3 | run AFK zostawił issue otwarte i nadal z `ready-for-agent` (porażka, praca niedokończona; także drugi odrzut przeglądu heavy) |
 | 4 | run AFK zostawił issue otwarte bez `ready-for-agent` (odkryty HITL) |
 | 5 | sesja HITL skończona, issue otwarte i bez `ready-for-agent` (nierozwiązane) |
 | 6 | sesja HITL skończona, issue otwarte z przywróconym `ready-for-agent` (wraca do AFK) |
+| 7 | przegląd heavy odrzucił issue pierwszy raz: otwarte ponownie z uwagami, poprawka w następnym runie |
 
 #### `ralph-epic` — epic od startu do odbioru
 

@@ -42,6 +42,13 @@ done-criteria say when that applies (see THE ISSUE).
 Where {SKILL_TDD} asks you to confirm seams with the user, nobody is there to answer: derive the
 seams from the issue's acceptance criteria, list them in your closing issue comment, and proceed.
 
+If the issue has a `## Przypadki do przetestowania` section, it is the oracle your tests are held
+to: write one test per listed case, named so the case is recognisable, asserting the expected
+outcome the case states — not merely that the code runs. A case you cannot cover with a test
+goes into your closing issue comment, with the reason. After you close the issue, a stronger
+model reviews your diff against that list. If the issue carries notes from a failed review,
+address every one of them.
+
 # FEEDBACK LOOPS
 
 Before committing, run the feedback loops declared in the `## Ralph` section of {AGENT_CONTRACT_FILE} and
