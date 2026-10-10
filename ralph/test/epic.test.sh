@@ -117,6 +117,12 @@ expect "  lists AFK ones too" 2 "#12: Afk"
 expect "  names the open blocker of a blocked one" 2 "#13: Decyzja (HITL) ← #12"
 expect_eq "  a free one gets no arrow" "$(grep -c '#12: Afk ←' <<<"$LAST_OUT")" "0"
 
+run $'0 12\n8 13' 10
+expect "usage limit too far to wait (8) -> stop with its own code, naming the issue and the restart" 8 "uruchom ralph-epic 10 ponownie"
+expect "  names the issue" 8 "(issue #13)"
+expect_eq "  no run after it" "$(runs)" "2"
+expect_eq "  notified" "$(grep -c 'limit użycia' "$FAKE/notifications")" "1"
+
 run $'1 12' 10
 expect "error -> stop with the cause" 1 "kod 1"
 

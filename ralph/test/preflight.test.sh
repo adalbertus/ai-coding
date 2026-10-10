@@ -77,6 +77,11 @@ expect "treść + gate pusto -> halt: nie udało się uruchomić" 1 "Nie udało 
 expect_not "pusty gate nie twierdzi, że sekcja niekompletna" "niekompletn"
 
 # 6b. Runtime kończy się błędem (nawet jeśli coś wypisał) -> ten sam komunikat.
+limit_stub=$(mktemp); printf '#!/bin/sh\nexit 8\n' > "$limit_stub"; chmod +x "$limit_stub"
+run "$RALPH_SECTION" "$limit_stub"
+rm -f "$limit_stub"
+expect "gate stopped by a usage limit -> halt with the limit code, not blaming the section" 8 "limit użycia"
+
 run "$RALPH_SECTION" "false"
 expect "gate kończy się błędem -> halt: nie udało się uruchomić" 1 "Nie udało się uruchomić"
 expect_not "gate z błędem nie twierdzi, że sekcja niekompletna" "niekompletn"

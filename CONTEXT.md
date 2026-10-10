@@ -250,6 +250,27 @@ and similar. It shows what the script decided and why it stopped, and it holds t
 **zapisy runu**. One per invocation: `ralph-once` under `ralph-epic` writes into the epic's log.
 _Avoid_: "log" alone when it is unclear which of the two files is meant.
 
+**Limit użycia** (usage limit):
+An exhausted usage window of the runtime's account (`five_hour`, `seven_day`): the runtime
+refuses further model calls until a known reset time. It is not a failure of the work — the
+issue is as unfinished as it was a moment before, and nothing about it was judged.
+_Avoid_: calling a run stopped by it a **porażka AFK**; confusing it with the model's context
+window.
+
+**Wznowienie po limicie** (resume after limit):
+Continuing the worker run that a **limit użycia** cut off, after the reset: the same session,
+with its context, picks up where it stopped — whether Ralph waited for the reset itself or was
+started again later.
+_Avoid_: confusing it with **ciepłe wznowienie** (`/zapisz` → `/podsumuj`); calling a fresh run
+of the same issue a resume.
+
+**Ślad limitu** (limit trace):
+What a run cut off by a **limit użycia** leaves behind so a later run can do the **wznowienie po
+limicie**: which issue, at which phase (worker or przegląd heavy), in which session, on which
+branch, until when. It is valid only while the issue and the branch are as the interrupted run
+left them; while valid, the interrupted worker's uncommitted changes are its work, not dirt.
+_Avoid_: confusing it with the **log przebiegu** (a record for diagnosis, never read back by Ralph).
+
 ## Sesja deliberacyjna (`/sesja`)
 
 Punkt wejścia do sesji projektowych: start tematu, checkpoint, wznowienie po `/clear`,

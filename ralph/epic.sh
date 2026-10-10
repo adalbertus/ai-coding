@@ -100,6 +100,9 @@ $(open_list)" ;;
     stop-error)
       finish "$RALPH_EXIT_ERROR" "Ralph: błąd" \
 "once.sh zakończył się błędem lub odmową (kod ${code}) przy epicu #${epic}${issue:+, issue #${issue}}. Przyczyna jest w komunikatach powyżej." ;;
+    stop-usage-limit)
+      finish "$RALPH_EXIT_USAGE_LIMIT" "Ralph: limit użycia" \
+"Limit użycia przerwał pracę nad epicem #${epic}${issue:+ (issue #${issue})}, a reset jest za daleko, żeby czekać. Po resecie uruchom ralph-epic ${epic} ponownie — Ralph wznowi przerwaną sesję ze śladu." ;;
     stop-limit)
       finish "$RALPH_EXIT_NOTHING" "Ralph: limit iteracji" \
 "Limit iteracji (${limit}) wyczerpany, a epic #${epic} nie jest gotowy do odbioru. Otwarte sub-issues:

@@ -315,16 +315,34 @@ ralph_model_display() {
   esac
 }
 
+# A one-shot model call (strażnik, selektor): its answer on stdout, the runtime's own stderr
+# dropped. Claude streams JSON so a usage limit shows in a field (ADR 0017): the call waits for the
+# reset (messages on stderr) and is repeated; a reset too far away -> rc RALPH_EXIT_USAGE_LIMIT.
 ralph_run_model_capture() {
   local runtime="$1" purpose="$2" prompt="$3"
 
   case "$runtime" in
     claude)
-      local model="claude-haiku-4-5-20251001"
-      claude -p --model "$model" --effort low "$prompt"
+      local model="claude-haiku-4-5-20251001" out rc hit reset type waits=0
+      while :; do
+        out=$(claude -p --model "$model" --effort low --output-format stream-json --verbose "$prompt" 2>/dev/null)
+        rc=$?
+        hit=$(ralph_stream_usage_limit <<<"$out")
+        if [ -z "$hit" ]; then
+          jq -R 'fromjson? // empty' <<<"$out" 2>/dev/null \
+            | jq -s -r '[.[] | select(.type == "result" and .is_error != true) | .result] | last // empty'
+          return "$rc"
+        fi
+        read -r reset type <<<"$hit"
+        waits=$((waits + 1))
+        if [ "$waits" -gt "$RALPH_LIMIT_MAX_WAITS" ] || ! ralph_wait_for_reset "$reset" "$type" >&2; then
+          ralph_say warn "⏸ Limit użycia ($type) — reset: $([ "${reset:-0}" -gt 0 ] && ralph_clock "$reset" || echo "nieznana godzina"), za daleko, żeby czekać. Uruchom ponownie po resecie." >&2
+          return "$RALPH_EXIT_USAGE_LIMIT"
+        fi
+      done
       ;;
     codex)
-      codex -a never exec --ephemeral -s read-only -C "$PWD" "$prompt"
+      codex -a never exec --ephemeral -s read-only -C "$PWD" "$prompt" 2>/dev/null
       ;;
     *)
       echo "Nieznany runtime: $runtime" >&2
@@ -445,10 +463,11 @@ ralph_stream_session_id() {
 # full stream lands in <git dir>/ralph-logs/ (outside the work tree, so `git status` stays
 # clean); the screen gets one line per step plus the final summary; the run ends with the
 # `claude --resume <id>` line. $4 labels the log file (issue-<n>, `local`). $5 = `readonly`
-# takes away the file-editing tools (przegląd heavy). The log path is left in RALPH_LAST_LOG.
+# takes away the file-editing tools (przegląd heavy). $6: a session id to resume instead of
+# starting a new one ($3 is then the follow-up message). The log path is left in RALPH_LAST_LOG.
 ralph_run_claude_worker() {
-  local model="$1" effort="$2" prompt="$3" label="${4:-run}" access="${5:-}"
-  local dir log rc id deny=()
+  local model="$1" effort="$2" prompt="$3" label="${4:-run}" access="${5:-}" session="${6:-}"
+  local dir log rc id deny=() resume=()
   dir=$(git rev-parse --git-path ralph-logs 2>/dev/null) || dir=""
   if [ -n "$dir" ] && mkdir -p "$dir" 2>/dev/null; then
     log="$dir/$(date +%Y%m%d-%H%M%S)-${label}.jsonl"
@@ -459,7 +478,8 @@ ralph_run_claude_worker() {
   RALPH_LAST_LOG="$log"
   # --disallowedTools is variadic: it must be followed by another option, never by the prompt.
   [ "$access" = readonly ] && deny=(--disallowedTools Edit Write NotebookEdit)
-  claude -p ${deny[@]+"${deny[@]}"} --permission-mode auto --output-format stream-json --verbose \
+  [ -n "$session" ] && resume=(--resume "$session")
+  claude -p ${resume[@]+"${resume[@]}"} ${deny[@]+"${deny[@]}"} --permission-mode auto --output-format stream-json --verbose \
     --model "$model" --effort "$effort" "$prompt" \
     | tee "$log" | ralph_render_stream
   rc=${PIPESTATUS[0]}
@@ -610,6 +630,200 @@ ralph_run_worker() {
       return 1
       ;;
   esac
+}
+
+# --- Limit użycia (ADR 0017): a Claude run stopped by an exhausted usage window is resumed, ---
+# --- not failed. The ślad lets a later run pick the session up when this process is gone.  ---
+
+# Longest in-process wait for a reset, in seconds; a later reset ends the run, ślad left behind.
+RALPH_LIMIT_WAIT_MAX="${RALPH_LIMIT_WAIT_MAX:-21600}"
+# Seconds added to the announced reset, so the first call after it is not refused again.
+RALPH_LIMIT_MARGIN="${RALPH_LIMIT_MARGIN:-60}"
+# Waits for a reset in one process before giving up: guards against a limit that never lifts.
+RALPH_LIMIT_MAX_WAITS=3
+# What a resumed session is told.
+RALPH_RESUME_PROMPT='Your previous turn was cut off by the account usage limit, which has now reset. Continue the task from exactly where you stopped: check the working tree and the issue first, then finish the remaining steps.'
+
+# Pure. $1: a Claude stream-json log (stdin when absent) -> "<resetsAt epoch> <limit type>" when
+# the run ended on a usage limit, nothing otherwise. The signal is the runtime's own error as the
+# last assistant message (`api_error: usage_limit_reached`); a failed last result after a
+# `rejected` rate-limit event counts too. resetsAt is 0 when the stream does not say.
+ralph_stream_usage_limit() {
+  jq -R 'fromjson? // empty' ${1:+"$1"} 2>/dev/null | jq -s -r '
+    ([.[] | select(.type == "rate_limit_event") | .rate_limit_info // {}] | last) as $rl
+    | ([.[] | select(.type == "assistant")] | last) as $a
+    | ([.[] | select(.type == "result")] | last) as $res
+    | if ($a.api_error // "") == "usage_limit_reached" then ($a.api_error_params.rate_limit_info // $rl // {})
+      elif ($res.is_error // false) == true and ($rl.status // "") == "rejected" then $rl
+      else empty end
+    | "\(.resetsAt // 0) \(.rateLimitType // "?")"'
+}
+
+# $1: epoch -> "HH:MM" for today, "DD.MM HH:MM" otherwise.
+ralph_clock() {
+  jq -rn --argjson t "$1" '
+    if ($t | strflocaltime("%F")) == (now | strflocaltime("%F")) then $t | strflocaltime("%H:%M")
+    else $t | strflocaltime("%d.%m %H:%M") end'
+}
+
+# Waits, by the wall clock, until the reset $1 (epoch) plus RALPH_LIMIT_MARGIN; $2: limit type.
+# Sleeps in short steps and re-reads the clock, so a machine that slept through the reset goes on
+# at once. rc 1 without waiting when the reset is unknown or more than RALPH_LIMIT_WAIT_MAX away.
+ralph_wait_for_reset() {
+  local reset="${1:-0}" type="$2" target now left
+  [ "$reset" -gt 0 ] 2>/dev/null || return 1
+  target=$((reset + RALPH_LIMIT_MARGIN))
+  now=$(date +%s)
+  [ $((target - now)) -le "$RALPH_LIMIT_WAIT_MAX" ] || return 1
+  [ "$target" -gt "$now" ] || return 0
+  ralph_say warn "⏸ Limit użycia ($type) — czekam na reset do $(ralph_clock "$target"), potem wznawiam."
+  ralph_notify "Ralph: limit użycia" "Czekam na reset limitu do $(ralph_clock "$target")."
+  while now=$(date +%s); [ "$now" -lt "$target" ]; do
+    left=$((target - now))
+    [ "$left" -gt 60 ] && left=60
+    sleep "$left"
+  done
+}
+
+# The ślad lives next to the lock: per worktree, outside the work tree.
+ralph_limit_trace_path() {
+  git rev-parse --git-path ralph-limit 2>/dev/null
+}
+
+# Writes the ślad: one key=value line per argument, then the caller's RALPH_LIMIT_CONTEXT lines.
+ralph_limit_trace_write() {
+  local f
+  f=$(ralph_limit_trace_path) || return 1
+  { printf '%s\n' "$@"; [ -z "${RALPH_LIMIT_CONTEXT:-}" ] || printf '%s\n' "$RALPH_LIMIT_CONTEXT"; } > "$f"
+}
+
+# $1: key -> its value in the ślad; rc 1 when there is no ślad.
+ralph_limit_trace_get() {
+  local f
+  f=$(ralph_limit_trace_path) && [ -f "$f" ] || return 1
+  sed -n "s/^$1=//p" "$f" | head -1
+}
+
+ralph_limit_trace_clear() {
+  local f
+  f=$(ralph_limit_trace_path) && rm -f "$f"
+}
+
+# Pure. Why a ślad no longer fits, or nothing when it does. $1: phase (worker|review); $2: issue
+# state (open|closed); $3: "true" when it has ready-for-agent; $4: branch in the ślad; $5: current
+# branch. The issue must be as the interrupted run left it: open and AFK for the worker, closed
+# (by the worker) for the przegląd heavy.
+ralph_limit_trace_stale() {
+  if [ "$4" != "$5" ]; then
+    echo "run przerwano na gałęzi $4, a bieżąca to ${5:-(brak)}"
+    return 0
+  fi
+  case "$1" in
+    review) [ "$2" = closed ] || echo "przerwany był przegląd heavy, a issue nie jest już zamknięte" ;;
+    *)
+      if [ "$2" != open ]; then echo "issue jest już zamknięte"
+      elif [ "$3" != true ]; then echo "issue nie ma już ready-for-agent"
+      fi ;;
+  esac
+}
+
+# Should this run resume from the ślad? $1: runtime; $2: the issue/epic argument (may be empty).
+# rc 0 = resume. rc 1 = run as usual: no ślad; a ślad of another runtime or issue (left alone);
+# GitHub did not answer (left alone); or a stale ślad (removed, one line on screen).
+ralph_limit_trace_applies() {
+  local runtime="$1" arg="$2" f issue state ready reason
+  f=$(ralph_limit_trace_path) && [ -f "$f" ] || return 1
+  issue=$(ralph_limit_trace_get issue)
+  if [ "$runtime" != "$(ralph_limit_trace_get runtime)" ]; then
+    ralph_say dim "Ślad limitu użycia (issue #${issue}) dotyczy innego runtime'u — zostawiam go: $f"
+    return 1
+  fi
+  if [ -n "$arg" ] && [ "$arg" != "$issue" ] && [ "$arg" != "$(ralph_issue_parent "$issue" 2>/dev/null)" ]; then
+    ralph_say dim "Ślad limitu użycia dotyczy issue #${issue}, nie #${arg} — zostawiam go: $f"
+    return 1
+  fi
+  state=$(gh issue view "$issue" --json state --jq '.state | ascii_downcase' 2>/dev/null)
+  ready=$(gh issue view "$issue" --json labels --jq 'any(.labels[]; .name == "ready-for-agent")' 2>/dev/null)
+  if [ -z "$state" ]; then
+    ralph_say warn "Nie udało się sprawdzić issue #${issue} ze śladu limitu użycia (gh) — zostawiam ślad, działam według zwykłych reguł."
+    return 1
+  fi
+  reason=$(ralph_limit_trace_stale "$(ralph_limit_trace_get phase)" "$state" "$ready" \
+    "$(ralph_limit_trace_get branch)" "$(git branch --show-current 2>/dev/null)")
+  if [ -n "$reason" ]; then
+    ralph_say warn "Usuwam nieaktualny ślad limitu użycia (issue #${issue}): ${reason}. Działam według zwykłych reguł."
+    ralph_limit_trace_clear
+    return 1
+  fi
+}
+
+# The stop message when a limit cannot be waited out here. $1: resetsAt (0 = unknown), $2: type.
+ralph_limit_stop_message() {
+  local when="nieznana godzina"
+  [ "${1:-0}" -gt 0 ] 2>/dev/null && when=$(ralph_clock "$1")
+  ralph_say warn "⏸ Limit użycia ($2) przerwał run; reset: $when — nie czekam na niego w tym procesie.
+Ślad zapisany ($(ralph_limit_trace_path)). Po resecie uruchom ten sam przebieg ponownie: Ralph wznowi
+przerwaną sesję, a niezacommitowane zmiany w drzewie są wtedy w porządku."
+}
+
+# Runs a worker (as ralph_run_worker) and carries a Claude run over a usage limit (ADR 0017): on
+# a limit it writes the ślad, waits for the reset when it is close enough and resumes the same
+# session, as often as needed up to RALPH_LIMIT_MAX_WAITS. A run that ends on its own removes the
+# ślad. $1-$6 as ralph_run_worker; $7: phase recorded in the ślad (worker|review); $8: a session
+# to resume (a restart from the ślad), waiting for its reset first. The ślad also gets the
+# caller's RALPH_LIMIT_CONTEXT (key=value lines). Sets RALPH_LIMIT_STOP: empty = the run ended on
+# its own; `limit` = stopped on a limit it could not wait out; `resume-failed` = the runtime did
+# not take the session up. In both the ślad stays and the message is printed. rc: the last run's.
+ralph_run_worker_through_limit() {
+  local runtime="$1" model="$2" effort="$3" prompt="$4" label="$5" mode="${6:-afk}" phase="${7:-worker}" session="${8:-}"
+  local rc=0 hit reset type waits=0 access=""
+  [ "$mode" = review ] && access=readonly
+  RALPH_LIMIT_STOP=""
+  if [ -n "$session" ]; then
+    reset=$(ralph_limit_trace_get resets_at); type=$(ralph_limit_trace_get limit)
+    if ! ralph_wait_for_reset "$reset" "$type"; then
+      RALPH_LIMIT_STOP=limit
+      ralph_limit_stop_message "$reset" "$type"
+      return 1
+    fi
+  fi
+  while :; do
+    if [ -n "$session" ]; then
+      ralph_say dim "Wznawiam sesję $session po limicie użycia..."
+      ralph_run_claude_worker "$model" "$effort" "$RALPH_RESUME_PROMPT" "${label}-wznowienie" "$access" "$session"
+      rc=$?
+      if [ -z "$(ralph_stream_session_id "$RALPH_LAST_LOG")" ]; then
+        RALPH_LIMIT_STOP=resume-failed
+        ralph_say err "✗ Nie udało się wznowić sesji $session po limicie użycia (kod $rc): runtime jej nie podjął.
+Zapis próby: $RALPH_LAST_LOG
+Ślad zostaje ($(ralph_limit_trace_path)): kolejne uruchomienie spróbuje znowu; usuń go, żeby wrócić do zwykłych reguł."
+        return "$rc"
+      fi
+    else
+      ralph_run_worker "$runtime" "$model" "$effort" "$prompt" "$label" "$mode"
+      rc=$?
+    fi
+    { [ "$runtime" = claude ] && [ "$mode" != hitl ] && [ -n "$RALPH_LAST_LOG" ]; } || return "$rc"
+    hit=$(ralph_stream_usage_limit "$RALPH_LAST_LOG")
+    if [ -z "$hit" ]; then
+      # A session here means this call wrote or was handed the ślad; leave anyone else's alone.
+      [ -z "$session" ] || ralph_limit_trace_clear
+      return "$rc"
+    fi
+    read -r reset type <<<"$hit"
+    session=$(ralph_stream_session_id "$RALPH_LAST_LOG")
+    # Nothing to resume without a session: the run counts as it always did.
+    [ -n "$session" ] || return "$rc"
+    ralph_limit_trace_write "runtime=$runtime" "phase=$phase" "session=$session" "model=$model" \
+      "effort=$effort" "label=$label" "resets_at=$reset" "limit=$type" \
+      "branch=$(git branch --show-current 2>/dev/null)"
+    waits=$((waits + 1))
+    if [ "$waits" -gt "$RALPH_LIMIT_MAX_WAITS" ] || ! ralph_wait_for_reset "$reset" "$type"; then
+      RALPH_LIMIT_STOP=limit
+      ralph_limit_stop_message "$reset" "$type"
+      return "$rc"
+    fi
+  done
 }
 
 ralph_lock_metadata() {
@@ -789,6 +1003,7 @@ RALPH_EXIT_DISCOVERED=4  # AFK run left it open without ready-for-agent (discove
 RALPH_EXIT_HITL_OPEN=5   # HITL session ended, issue open without ready-for-agent
 RALPH_EXIT_HITL_TO_AFK=6 # HITL session ended, issue open with ready-for-agent restored
 RALPH_EXIT_REVIEW_RETRY=7 # przegląd heavy failed once: issue reopened for one fix
+RALPH_EXIT_USAGE_LIMIT=8  # a usage limit stopped the run; ślad left for a resume (ADR 0017)
 
 # $1: exit code of a finished worker run (from ralph_run_outcome); $2: issue number -> the
 # one-line verdict, coloured: green done, orange waiting for a human, red failure.
@@ -887,17 +1102,23 @@ ralph_review_notes() {
 }
 
 # Runs the przegląd heavy of closed issue $2 over the commits $3..HEAD, then acts on the verdict.
-# $1: runtime, $4: the issue as the worker got it. Leaves in RALPH_REVIEW_EXIT the exit code
-# once.sh should report instead of the issue's state, or nothing when the przegląd accepted it.
+# $1: runtime, $4: the issue as the worker got it, $5: a przegląd session to resume (a restart
+# from the ślad, ADR 0017). Leaves in RALPH_REVIEW_EXIT the exit code once.sh should report
+# instead of the issue's state, or nothing when the przegląd accepted it. A przegląd stopped by a
+# usage limit gives no verdict and touches nothing: the issue stays closed, the ślad remembers it.
 ralph_heavy_review() {
-  local runtime="$1" num="$2" base="$3" issue="$4" prompt report verdict prior action cost body
+  local runtime="$1" num="$2" base="$3" issue="$4" session="${5:-}" prompt report verdict prior action cost body
   RALPH_REVIEW_EXIT=""
   ralph_review_model "$runtime"
   prompt=$(ralph_render_prompt "$runtime" "$SCRIPT_DIR/prompt-review.md")
   ralph_say dim "Przegląd heavy issue #${num} na $(ralph_model_display "$runtime" "$RALPH_REVIEW_MODEL" "$RALPH_REVIEW_EFFORT")..."
   RALPH_LAST_LOG=""
-  RALPH_REPORT_TITLE="Raport przeglądu" ralph_run_worker "$runtime" "$RALPH_REVIEW_MODEL" "$RALPH_REVIEW_EFFORT" \
-    "Issue under review: $issue Commit range to review: ${base}..HEAD $prompt" "review-${num}" review
+  RALPH_REPORT_TITLE="Raport przeglądu" ralph_run_worker_through_limit "$runtime" "$RALPH_REVIEW_MODEL" "$RALPH_REVIEW_EFFORT" \
+    "Issue under review: $issue Commit range to review: ${base}..HEAD $prompt" "review-${num}" review review "$session"
+  case "$RALPH_LIMIT_STOP" in
+    limit) RALPH_REVIEW_EXIT="$RALPH_EXIT_USAGE_LIMIT"; return 0 ;;
+    resume-failed) RALPH_REVIEW_EXIT="$RALPH_EXIT_ERROR"; return 0 ;;
+  esac
   report=""; [ -n "$RALPH_LAST_LOG" ] && report=$(ralph_last_report "$runtime" "$RALPH_LAST_LOG")
   cost=""; [ -n "$RALPH_LAST_LOG" ] && cost=$(ralph_run_cost "$runtime" "$RALPH_LAST_LOG")
   [ -n "$cost" ] && ralph_say dim "Koszt przeglądu: $cost"
@@ -1032,12 +1253,13 @@ ralph_epic_iteration_limit() {
 
 # Pure. Decision after one once.sh run. $1: its exit code; $2: runs done so far (this one
 # included); $3: limit; $4: "true" when the epic is now awaiting acceptance. Prints `continue`
-# or `stop-<reason>` (ready|afk-failed|hitl|nothing|error|limit). An error is never masked by a
-# ready epic; a failed AFK run is never masked by the limit.
+# or `stop-<reason>` (ready|afk-failed|hitl|nothing|error|limit|usage-limit). An error is never
+# masked by a ready epic; a failed AFK run is never masked by the limit.
 ralph_epic_decision() {
   local code="$1" done_runs="$2" limit="$3" ready="$4"
   case "$code" in
     "$RALPH_EXIT_ERROR") echo stop-error; return 0 ;;
+    "$RALPH_EXIT_USAGE_LIMIT") echo stop-usage-limit; return 0 ;;
     "$RALPH_EXIT_AFK_FAILED") echo stop-afk-failed; return 0 ;;
     "$RALPH_EXIT_HITL_OPEN") echo stop-hitl; return 0 ;;
     "$RALPH_EXIT_DONE"|"$RALPH_EXIT_NOTHING"|"$RALPH_EXIT_DISCOVERED"|"$RALPH_EXIT_HITL_TO_AFK"|"$RALPH_EXIT_REVIEW_RETRY") ;;

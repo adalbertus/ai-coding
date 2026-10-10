@@ -7,6 +7,7 @@
 # Contract (this is the interface both once.sh and once-local.sh rely on):
 #   - run from the target repo's cwd;
 #   - exit 0  -> READY  (loop may proceed);
+#   - exit 8  -> halt on a usage limit too far away to wait for (ADR 0017; reset time printed);
 #   - exit !=0 -> halt   (reason + how-to-fix printed to stderr).
 #
 # The model gate is stubbable for tests via RALPH_GATE_CMD (a command whose stdout is the
@@ -95,7 +96,14 @@ if [ -n "${RALPH_GATE_CMD:-}" ]; then
   verdict=$($RALPH_GATE_CMD 2>/dev/null); gate_rc=$?
 else
   echo "Strażnik ($(ralph_selector_model_label "$runtime")): weryfikuję sekcję ## Ralph... (chwilę trwa)" >&2
-  verdict=$(ralph_run_model_capture "$runtime" guard "$gate_prompt" 2>/dev/null); gate_rc=$?
+  verdict=$(ralph_run_model_capture "$runtime" guard "$gate_prompt"); gate_rc=$?
+fi
+
+# A usage limit says nothing about the section either; the wait (or why there was none) is already
+# on screen.
+if [ "$gate_rc" = "$RALPH_EXIT_USAGE_LIMIT" ]; then
+  ralph_say warn "✋ Strażnik nie zweryfikował sekcji \"## Ralph\": limit użycia runtime'u \"$runtime\"." >&2
+  exit "$RALPH_EXIT_USAGE_LIMIT"
 fi
 
 # A failed or silent model call says nothing about the section: halt (fail-closed) but blame the

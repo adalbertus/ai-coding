@@ -880,6 +880,149 @@ expect_eq "heavy review: second FAIL -> reopen, AFK-failed code" \
 expect_eq "heavy review: no verdict -> reopen without the marker, error code" \
   "$(review_case 'I could not decide' 0)" "1|issue reopen 12;issue edit 12;issue comment 12;"
 
+# --- Limit użycia (ADR 0017) ---
+LIMIT_FIXTURE="$SCRIPT_DIR/fixtures/usage-limit.jsonl"
+SID=92d20c8c-b0e0-4fbc-9256-3fde3852c1e6
+expect_eq "usage limit: a real stopped run -> reset and type" "$(ralph_stream_usage_limit "$LIMIT_FIXTURE")" "1791596400 five_hour"
+expect_eq "usage limit: read from stdin too" "$(ralph_stream_usage_limit < "$LIMIT_FIXTURE")" "1791596400 five_hour"
+expect_eq "usage limit: a normal run -> nothing" "$(ralph_stream_usage_limit <<<"$stream_fixture")" ""
+expect_eq "usage limit: warnings only, run ended on another error -> nothing" \
+  "$(grep -v 'usage_limit_reached\|"status":"rejected"' "$LIMIT_FIXTURE" | ralph_stream_usage_limit)" ""
+expect_eq "usage limit: no runtime message, but a failed result after a rejected event -> limit" \
+  "$(grep -v 'usage_limit_reached' "$LIMIT_FIXTURE" | ralph_stream_usage_limit)" "1791596400 five_hour"
+expect_eq "usage limit: a rejected event followed by a successful result -> nothing" \
+  "$(grep -v 'usage_limit_reached' "$LIMIT_FIXTURE" | sed 's/"is_error":true/"is_error":false/' | ralph_stream_usage_limit)" ""
+
+expect_eq "stale ślad: worker, issue open + AFK, same branch -> fits" "$(ralph_limit_trace_stale worker open true epic/45 epic/45)" ""
+expect_eq "stale ślad: worker, issue closed" "$(ralph_limit_trace_stale worker closed false epic/45 epic/45)" "issue jest już zamknięte"
+expect_eq "stale ślad: worker, ready-for-agent removed" "$(ralph_limit_trace_stale worker open false epic/45 epic/45)" "issue nie ma już ready-for-agent"
+expect_eq "stale ślad: another branch" "$(ralph_limit_trace_stale worker open true epic/45 dev)" "run przerwano na gałęzi epic/45, a bieżąca to dev"
+expect_eq "stale ślad: review, issue closed -> fits" "$(ralph_limit_trace_stale review closed false epic/45 epic/45)" ""
+expect_eq "stale ślad: review, issue reopened" "$(ralph_limit_trace_stale review open true epic/45 epic/45)" "przerwany był przegląd heavy, a issue nie jest już zamknięte"
+
+now=$(date +%s)
+expect_ok "wait for reset: a reset in the past -> go on at once" ralph_wait_for_reset $((now - 100)) five_hour
+expect_fail "wait for reset: more than 6 h away -> no wait" ralph_wait_for_reset $((now + 30000)) seven_day
+expect_fail "wait for reset: unknown reset -> no wait" ralph_wait_for_reset 0 five_hour
+# Not `now` inside the stubs: ralph_wait_for_reset has a local of that name, which they would see.
+wait_out=$(t0=$now; RALPH_LIMIT_MARGIN=0; date() { echo "$t0"; }; sleep() { echo "sleep $1"; date() { echo $((t0 + 10)); }; }; ralph_notify() { :; }; ralph_wait_for_reset $((now + 5)) five_hour)
+expect_eq "wait for reset: announces the time, sleeps until the wall clock passes it" \
+  "$(sed 's/do [0-9:. ]*,/do T,/' <<<"$wait_out")" "⏸ Limit użycia (five_hour) — czekam na reset do T, potem wznawiam.
+sleep 5"
+
+# A fake claude that plays one stream per call: <Q>/<n>.jsonl, exit <Q>/<n>.rc; argv -> <Q>/argv.<n>.
+fake_lim=$(mktemp -d)
+mkdir "$fake_lim/bin" "$fake_lim/q"
+cat > "$fake_lim/bin/claude" <<'FAKE_CLAUDE'
+#!/usr/bin/env bash
+n=$(( $(cat "$FAKE_Q/count" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$FAKE_Q/count"
+printf '%s\n' "$@" > "$FAKE_Q/argv.$n"
+cat "$FAKE_Q/$n.jsonl" 2>/dev/null
+exit "$(cat "$FAKE_Q/$n.rc" 2>/dev/null || echo 0)"
+FAKE_CLAUDE
+chmod +x "$fake_lim/bin/claude"
+# limit_stream <resetsAt> -> the real fixture with the reset moved.
+limit_stream() { sed "s/1791596400/$1/g" "$LIMIT_FIXTURE"; }
+DONE_STREAM='{"type":"system","subtype":"init","session_id":"92d20c8c-b0e0-4fbc-9256-3fde3852c1e6"}
+{"type":"result","is_error":false,"num_turns":3,"result":"Gotowe.","session_id":"92d20c8c-b0e0-4fbc-9256-3fde3852c1e6"}'
+# limit_case <setup> <fn call...>: runs in a fresh git repo with the fake claude; prints
+# "<RALPH_LIMIT_STOP>|<calls>|<ślad keys or 'brak'>".
+limit_case() {
+  local setup="$1"; shift
+  (
+    repo=$(mktemp -d); cd "$repo" || exit 1
+    git init -q; git checkout -q -b epic/45
+    rm -rf "$fake_lim/q"; mkdir "$fake_lim/q"
+    export FAKE_Q="$fake_lim/q" RALPH_LIMIT_MARGIN=0
+    PATH="$fake_lim/bin:$PATH"
+    ralph_notify() { :; }
+    : > "$fake_lim/out"
+    eval "$setup" >>"$fake_lim/out" 2>&1
+    "$@" >>"$fake_lim/out" 2>&1
+    f=$(ralph_limit_trace_path)
+    printf '%s|%s|%s' "${RALPH_LIMIT_STOP:-none}" "$(cat "$FAKE_Q/count" 2>/dev/null || echo 0)" \
+      "$([ -f "$f" ] && sed 's/=.*//' "$f" | tr '\n' ',' || echo brak)"
+    rm -rf "$repo"
+  )
+}
+
+past=$((now - 100)); far=$((now + 30000))
+expect_eq "worker hits a limit with the reset passed -> resumes the session, run ends, ślad gone" \
+  "$(limit_case "limit_stream $past > \$FAKE_Q/1.jsonl; printf '%s\n' \"\$DONE_STREAM\" > \$FAKE_Q/2.jsonl" \
+     ralph_run_worker_through_limit claude sonnet high PROMPT issue-12 afk worker)" "none|2|brak"
+expect_eq "  the second call resumes that session with the follow-up message, same model" \
+  "$(head -10 "$fake_lim/q/argv.2" | tr '\n' ' ')" "-p --resume $SID --permission-mode auto --output-format stream-json --verbose --model sonnet "
+expect_eq "  and is told to continue" "$(tail -1 "$fake_lim/q/argv.2")" "$RALPH_RESUME_PROMPT"
+expect_eq "  the first call is a fresh run" "$(grep -c -- '--resume' "$fake_lim/q/argv.1")" "0"
+
+expect_eq "worker hits a limit too far away -> stops, ślad left with the caller's context" \
+  "$(limit_case "limit_stream $far > \$FAKE_Q/1.jsonl; RALPH_LIMIT_CONTEXT=\$'issue=12\npre_head=abc\ncomplexity=heavy'" \
+     ralph_run_worker_through_limit claude sonnet high PROMPT issue-12 afk worker)" \
+  "limit|1|runtime,phase,session,model,effort,label,resets_at,limit,branch,issue,pre_head,complexity,"
+expect_eq "  the stop message says what to do" "$(grep -c 'uruchom ten sam przebieg ponownie' "$fake_lim/out")" "1"
+
+trace_setup="ralph_limit_trace_write runtime=claude phase=worker session=$SID model=sonnet effort=high label=issue-12 resets_at=$past limit=five_hour branch=epic/45 issue=12"
+expect_eq "restart from the ślad -> resumes right away, run ends, ślad gone" \
+  "$(limit_case "$trace_setup; printf '%s\n' \"\$DONE_STREAM\" > \$FAKE_Q/1.jsonl" \
+     ralph_run_worker_through_limit claude sonnet high "" issue-12 afk worker "$SID")" "none|1|brak"
+expect_eq "  with --resume" "$(sed -n 2,3p "$fake_lim/q/argv.1" | tr '\n' ' ')" "--resume $SID "
+expect_eq "restart, but the runtime does not take the session up -> stop, ślad stays" \
+  "$(limit_case "$trace_setup; echo 1 > \$FAKE_Q/1.rc" \
+     ralph_run_worker_through_limit claude sonnet high "" issue-12 afk worker "$SID")" \
+  "resume-failed|1|runtime,phase,session,model,effort,label,resets_at,limit,branch,issue,"
+expect_eq "restart before a far reset -> no call, stop, ślad stays" \
+  "$(limit_case "${trace_setup/resets_at=$past/resets_at=$far}" \
+     ralph_run_worker_through_limit claude sonnet high "" issue-12 afk worker "$SID")" \
+  "limit|0|runtime,phase,session,model,effort,label,resets_at,limit,branch,issue,"
+expect_eq "a limit that never lifts -> gives up after $RALPH_LIMIT_MAX_WAITS waits" \
+  "$(limit_case "for i in 1 2 3 4 5; do limit_stream $past > \$FAKE_Q/\$i.jsonl; done" \
+     ralph_run_worker_through_limit claude sonnet high PROMPT issue-12 afk worker)" \
+  "limit|4|runtime,phase,session,model,effort,label,resets_at,limit,branch,"
+expect_eq "a normal run leaves another run's ślad alone" \
+  "$(limit_case "$trace_setup; printf '%s\n' \"\$DONE_STREAM\" > \$FAKE_Q/1.jsonl" \
+     ralph_run_worker_through_limit claude sonnet high PROMPT issue-13 afk worker)" \
+  "none|1|runtime,phase,session,model,effort,label,resets_at,limit,branch,issue,"
+
+# Which ślad applies: fake gh answers issue 12's state/labels and its parent (45).
+applies_case() {
+  local state="$1" labels="$2" arg="$3" branch="${4:-epic/45}"
+  limit_case "$trace_setup; git checkout -q -b $branch 2>/dev/null || true
+    gh() { case \"\$*\" in
+      *'--json state'*) echo $state ;;
+      *'--json labels'*) echo $labels ;;
+      *'/parent'*) echo 45 ;;
+    esac; }
+    ralph_limit_trace_applies claude '$arg' && RALPH_LIMIT_STOP=applies" true
+}
+expect_eq "ślad applies: issue open + AFK, same branch, epic as the argument" "$(applies_case open true 45)" "applies|0|runtime,phase,session,model,effort,label,resets_at,limit,branch,issue,"
+expect_eq "ślad applies: the issue itself as the argument" "$(applies_case open true 12 | cut -d'|' -f1)" "applies"
+expect_eq "ślad applies: no argument" "$(applies_case open true '' | cut -d'|' -f1)" "applies"
+expect_eq "ślad of another issue: not applied, left alone" "$(applies_case open true 77)" "none|0|runtime,phase,session,model,effort,label,resets_at,limit,branch,issue,"
+expect_eq "  says so in one line" "$(grep -c 'dotyczy issue #12, nie #77 — zostawiam' "$fake_lim/out")" "1"
+expect_eq "stale ślad (issue closed meanwhile): not applied, removed" "$(applies_case closed false 45)" "none|0|brak"
+expect_eq "  with the reason" "$(grep -c 'Usuwam nieaktualny ślad limitu użycia (issue #12): issue jest już zamknięte' "$fake_lim/out")" "1"
+expect_eq "stale ślad (another branch): not applied, removed" "$(applies_case open true 45 dev)" "none|0|brak"
+expect_eq "GitHub does not answer: not applied, left alone" "$(applies_case '' '' 45 | cut -d'|' -f1,3)" "none|runtime,phase,session,model,effort,label,resets_at,limit,branch,issue,"
+
+# Strażnik / selektor: one-shot calls wait and repeat; the answer is the result text.
+capture_case() {
+  limit_case "$1; out=\$(ralph_run_model_capture claude guard PROMPT 2>/dev/null); rc=\$?; echo \"\$out/\$rc\" > \$FAKE_Q/answer" true
+  printf '|%s' "$(cat "$fake_lim/q/answer")"
+}
+ANSWER_STREAM='{"type":"system","subtype":"init","session_id":"s"}
+{"type":"result","is_error":false,"num_turns":1,"result":"READY","session_id":"s"}'
+expect_eq "model call: the answer is the result text" \
+  "$(capture_case "printf '%s\n' \"\$ANSWER_STREAM\" > \$FAKE_Q/1.jsonl")" "none|1|brak|READY/0"
+expect_eq "  through stream-json" "$(grep -c -- 'stream-json' "$fake_lim/q/argv.1")" "1"
+expect_eq "model call: a limit with the reset passed -> repeated, then answered" \
+  "$(capture_case "limit_stream $past > \$FAKE_Q/1.jsonl; printf '%s\n' \"\$ANSWER_STREAM\" > \$FAKE_Q/2.jsonl")" "none|2|brak|READY/0"
+expect_eq "model call: a limit too far away -> limit code, no ślad" \
+  "$(capture_case "limit_stream $far > \$FAKE_Q/1.jsonl")" "none|1|brak|/$RALPH_EXIT_USAGE_LIMIT"
+rm -rf "$fake_lim"
+
+expect_eq "decision: 8 (usage limit) -> stop-usage-limit" "$(dec 8 1 5 false)" "stop-usage-limit"
+expect_eq "decision: usage limit is not masked by a ready epic" "$(dec 8 1 5 true)" "stop-usage-limit"
+
 echo
 echo "Wynik: $pass OK, $fail FAIL"
 [ "$fail" = 0 ]

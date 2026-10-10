@@ -251,7 +251,7 @@ Po runie skrypt wypisuje werdykt: zielone `✓ Issue #N zamknięte.`, czerwone `
 domknięte`, pomarańczowe `⚠`, gdy issue czeka na człowieka (odkryty HITL, nierozwiązana sesja
 HITL). Tak samo kolorowane są komunikaty skryptów: czerwone błędy i odmowy, pomarańczowe stopy
 czekające na Twoją decyzję (strażnik `✋`, bramka `needs-human-test`, brak wolnych zadań, limit
-iteracji), zielone sukcesy (epic do odbioru). Kolory są tylko na terminalu; `NO_COLOR` je
+iteracji, limit użycia `⏸`), zielone sukcesy (epic do odbioru). Kolory są tylko na terminalu; `NO_COLOR` je
 wyłącza, a w przekierowaniu do pliku ich nie ma.
 
 **Sesja HITL.** Tryb workera wynika z issue, nie z komendy. Issue z labelką `ready-for-agent`
@@ -377,6 +377,21 @@ runie, nie z wyniku procesu workera):
 | 5 | sesja HITL skończona, issue otwarte i bez `ready-for-agent` (nierozwiązane) |
 | 6 | sesja HITL skończona, issue otwarte z przywróconym `ready-for-agent` (wraca do AFK) |
 | 7 | przegląd heavy odrzucił issue pierwszy raz: otwarte ponownie z uwagami, poprawka w następnym runie |
+| 8 | limit użycia przerwał run, a reset jest dalej niż 6 h; ślad zostaje do wznowienia (niżej) |
+
+**Wznowienie po limicie użycia** (tylko Claude, ADR 0017). Gdy worker albo przegląd heavy trafi
+na wyczerpany limit konta (np. pięciogodzinne okno w nocy), to nie jest porażka. Ralph zapisuje
+ślad w `.git/ralph-limit` (issue, faza, sesja, gałąź, godzina resetu), a jeśli reset wypada
+w ciągu 6 h, wysyła powiadomienie „czekam do HH:MM”, śpi według zegara ściennego i wznawia tę
+samą sesję (`claude -p --resume <id>`) z poleceniem kontynuacji — w tej samej iteracji
+`ralph-epic`. Strażnik i selektor po prostu czekają i powtarzają wywołanie. Gdy proces zginie
+w trakcie czekania (laptop wyłączony), rano uruchamiasz to samo co wieczorem (`ralph-epic 45`,
+`ralph-once 52` albo `ralph-once`): ślad jest ważny, gdy issue jest w stanie z chwili przerwania
+(worker: otwarte z `ready-for-agent`; przegląd: zamknięte) i bieżąca gałąź jest ta sama. Wtedy
+brudne drzewo nie blokuje, a Ralph wznawia sesję przed bramkami i strażnikiem. Nieważny ślad
+znika z jedną linią na ekranie; ślad innego issue lub runtime'u zostaje nietknięty. Gdy runtime
+nie podejmie sesji, run kończy się błędem z komunikatem, a ślad zostaje (usuń go, żeby wrócić do
+zwykłych reguł). Na Codeksie limit jest porażką jak dotąd.
 
 #### `ralph-epic` — epic od startu do odbioru
 
@@ -402,6 +417,7 @@ powiadomień).
 | nic do zrobienia (2) | lista otwartych sub-issues (HITL oznaczone) | odblokuj je, dodaj decyzję lub `ready-for-agent`, uruchom ponownie |
 | błąd lub odmowa (1) | przyczyna z komunikatów `ralph-once` | naprawiasz (brudne drzewo, konflikt scalania, lock, strażnik) i uruchamiasz ponownie |
 | limit iteracji (2) | liczba iteracji i lista otwartych | sprawdzasz, czemu epic nie schodzi, i uruchamiasz ponownie |
+| limit użycia (8) | issue i godzina resetu (pomarańczowe) | po resecie uruchamiasz `ralph-epic <nr>` ponownie — wznowi przerwaną sesję; limit z resetem w ciągu 6 h pętla przeczekuje sama |
 
 Sesja HITL rozwiązana (issue domknięte albo z przywróconym `ready-for-agent`) i odkryty HITL
 (kod 4) nie zatrzymują pętli — idzie następna iteracja. Limit iteracji to dwukrotność liczby
