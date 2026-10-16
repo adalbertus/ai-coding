@@ -1,16 +1,15 @@
 ---
 name: ralph-konfiguracja
-description: One-time HITL setup that makes a repo runnable by the shared Ralph loop. Detects the stack, writes a usable "## Ralph" section (feedback loops + done-criteria + commit conventions) into the repo's native agent contract files (CLAUDE.md and AGENTS.md), creates the GitHub labels the loop relies on, and proposes rewording any agent-contract instruction that makes agents read a large reference file wholesale. Run it in a capable agent session. Invoked explicitly via /ralph-konfiguracja or $ralph-konfiguracja (the preflight strażnik points the user here when the section is missing).
+description: One-time HITL setup that makes a repo runnable by the shared Ralph loop. Detects the stack, writes a usable "## Ralph" section (feedback loops + done-criteria + commit conventions) into the repo's CLAUDE.md (and removes a stale "## Ralph" from AGENTS.md), creates the GitHub labels the loop relies on, and proposes rewording any agent-contract instruction that makes agents read a large reference file wholesale. Run it in a capable Claude session. Invoked explicitly via /ralph-konfiguracja (the preflight strażnik points the user here when the section is missing).
 disable-model-invocation: true
 ---
 
-# /ralph-konfiguracja / $ralph-konfiguracja — make this repo runnable by Ralph
+# /ralph-konfiguracja — make this repo runnable by Ralph
 
 The shared loop (`ralph-once` / `ralph-once-local`) is stack-agnostic. Before it will run in a
-repo, a **preflight strażnik** (`ralph/preflight.sh`) requires that repo's selected runtime
-contract file (`CLAUDE.md` for Claude, `AGENTS.md` for Codex) carry a usable `## Ralph` section
-declaring **how to test** and **what "done" means**. This skill writes the same section into
-both files, once, per repo.
+repo, a **preflight strażnik** (`ralph/preflight.sh`) requires that repo's `CLAUDE.md` carry a
+usable `## Ralph` section declaring **how to test** and **what "done" means**. This skill writes
+that section, once, per repo. Ralph runs only on Claude, so the section lives only in `CLAUDE.md`.
 
 This is deliberately a **human-in-the-loop** task on a capable model — the test commands and
 done-criteria are repo-judgment, not something to autogenerate blindly. Confirm each piece with
@@ -18,14 +17,14 @@ the user before writing.
 
 ## What it produces
 
-1. A `## Ralph` section in the repo's `CLAUDE.md` (created if the file is absent), with the
-   same section mirrored into `AGENTS.md` (created if absent). It contains the parts the
+1. A `## Ralph` section in the repo's `CLAUDE.md` (created if the file is absent). A `## Ralph`
+   left in `AGENTS.md` is migrated into it and removed (step 5). It contains the parts the
    strażnik checks for — **feedback loops** + **done-criteria** (required) — plus **commit
    conventions**, **epic closing**, and **acceptance notes** (all recommended), **doc-sync** (only
    if the repo keeps durable docs it can invalidate), and an optional **epic-branch line** (only
    for a repo with a separate production branch).
 2. The GitHub labels the loop relies on — **only** for GitHub-backed repos.
-3. Where it applies: a **reworded** instruction elsewhere in `CLAUDE.md` / `AGENTS.md`, so agents
+3. Where it applies: a **reworded** instruction elsewhere in `CLAUDE.md` / `AGENTS.md` (Codex still reads `AGENTS.md` in ordinary sessions), so agents
    consult large reference files instead of reading them whole (proposed to the user, never
    silent).
 
@@ -107,15 +106,10 @@ branch would block a hotfix. Ask as a chat question with your recommendation and
 
 ### 5. Write the `## Ralph` section
 
-Create `CLAUDE.md` and `AGENTS.md` if missing. If a `## Ralph` section already exists in either
-file, **replace it in place** (don't append a duplicate) — and read BOTH before writing: when the
-two have drifted, the newer one is not automatically right in every respect, so reconcile them
-point by point (commit target, doc-sync list, extra rules) and confirm anything ambiguous with
-the user. Use a level-2 heading exactly
-`## Ralph` — the strażnik greps for it. Sub-sections use `###` (they stay inside the section).
-The section content must be **identical** in both files — the strażnik compares them (modulo
-trailing whitespace and blank lines) and halts the run on any difference. Write both in this one
-pass; never hand-edit one of them later. Template:
+Write the section **only to `CLAUDE.md`** (create the file if missing). Never create `AGENTS.md`
+just to hold `## Ralph`. If `CLAUDE.md` already has a `## Ralph` section, **replace it in place**
+(don't append a duplicate). Use a level-2 heading exactly `## Ralph` — the strażnik greps for it.
+Sub-sections use `###` (they stay inside the section). Template:
 
 ```markdown
 ## Ralph
@@ -189,6 +183,15 @@ Gdy przy odbiorze epicu wskażę poprawki:
   zgłosi epic do odbioru.
 ```
 
+#### Clean up `## Ralph` in `AGENTS.md`
+
+If `AGENTS.md` exists and has a `## Ralph` section, read it and the `CLAUDE.md` one before
+writing. Whatever is only in the `AGENTS.md` copy and still true (a commit target, a doc-sync
+entry, an extra rule) — move it into the `CLAUDE.md` section, resolving conflicts point by point
+and confirming anything ambiguous with the user. Only then delete the `## Ralph` section from
+`AGENTS.md` (through the next level-2 heading or end of file), leaving the rest of the file
+untouched. If that leaves `AGENTS.md` empty, tell the user instead of deleting it silently.
+
 Fill every placeholder. The section the strażnik accepts has **concrete, executable**
 instructions for both feedback loops and done-criteria.
 
@@ -248,9 +251,9 @@ Skip the step entirely when the repo has no large reference file. See `docs/adr/
 ### 8. Hand back
 
 Tell the user in one or two Polish sentences what was written and what is next: that
-`ralph-once claude` / `ralph-once codex` (or `ralph-once-local`) will now pass the strażnik in
-this repo, and that issues get triaged with `/to-issues-ralph` or `$to-issues-ralph`. Mention
-the reword from step 7 only if one was made.
+`ralph-once` / `ralph-epic` (or `ralph-once-local`) in Claude will now pass the strażnik in
+this repo, and that issues get triaged with `/to-issues-ralph`. Mention the `AGENTS.md` cleanup
+and the reword from step 7 only if they happened.
 
 ## Notes
 
