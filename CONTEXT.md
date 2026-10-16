@@ -139,6 +139,14 @@ The part of the agent contract where a repo declares its own way of working for 
 feedback loops to run before a commit (required) and the done-criteria. The shared prompts stay
 stack-agnostic and delegate to it.
 
+**Bramka** (gate):
+A repo's automated checks — tests, formatters, static analysis — declared in the `## Ralph`
+section as one command. The worker runs it before closing a task; the loop then runs it again
+itself after every closed sub-issue and in weryfikacja epica, so a green bramka is never just the
+worker's word. A test that fails and then passes with no change in between is a defect to fix
+(niestabilny test), never luck to retry past.
+_Avoid_: "CI" — it runs locally inside the loop; rerunning until green.
+
 **Done-criteria** (kryteria ukończenia):
 The condition under which a task counts as finished: whether the automated gate can prove it
 (→ the worker closes it) or an un-gateable surface remains (→ `needs-human-test`). Declared
@@ -175,17 +183,36 @@ It neither writes code nor judges style. Failing it reopens the sub-issue for on
 failure stops the epic for a human.
 _Avoid_: "review" (clashes with `/code-review`); a przegląd that fixes code itself.
 
+**Weryfikacja epica** (epic verification):
+The automated check of a whole epic after its last sub-issue closes and before odbiór: the gate
+run by the loop itself, the epic's changes to tests, and a review of the epic's diff against its
+PRD by a stronger model. It is the epic's last piece of work and the only thing that puts the
+epic up for odbiór. A blocking finding — security, a departure from the PRD, something that does
+not work — becomes a fix sub-issue of the epic; a matter of taste goes to odbiór as a proposal.
+After two rounds, whatever still blocks goes to odbiór anyway, listed first.
+_Avoid_: "review" (clashes with `/code-review`); "przegląd epica" (blurs with przegląd `heavy`);
+calling it odbiór — it checks what was specified, odbiór judges what is wanted.
+
 **needs-human-test**:
 An epic whose sub-issues are all closed, awaiting odbiór — or, for a task with no epic, a task
 implemented but awaiting a human to verify it. While one is open, the GitHub loop refuses to start
-new work. On an epic it is applied by the loop itself once no sub-issue is open, whoever closed
-the last one; on a task with no epic, by the worker after implementation. Never at triage.
+new work. On an epic it is applied only by its weryfikacja epica; on a task with no epic, by the
+worker after implementation. Never at triage.
 
 **Odbiór** (acceptance):
 A human judging whether what shipped is what they *want* — layout, wording, placement, "actually,
 differently". Distinct from *verifying* that it works as specified, which belongs to the
 automated gate. Only odbiór is inherently human; it is done once per epic, not per task.
 _Avoid_: using "manual test" for both; treating odbiór as a gap an e2e suite will close.
+
+**Lista odbioru** (acceptance list):
+What weryfikacja epica hands the human for odbiór: the epic's `## Jak odebrać` steps, what the
+bramka cannot prove, screens whose look changed (before / after), matters of taste proposed for
+decision, and blocking findings left after the last round, listed first. Nothing an agent could
+check itself. The human works through it in an interactive page that keeps every verdict,
+comment and screenshot, so odbiór can stop and resume days later; one page per epic, with a new
+round added after fixes.
+_Avoid_: per-task manual test steps; "checklist" for the page itself.
 
 **AFK / HITL**:
 AFK = a task fit to run unsupervised (label `ready-for-agent`); HITL = one needing a human
@@ -195,16 +222,18 @@ A task planned as AFK that the worker finds needs a human becomes HITL: the work
 and says in the thread what is needed; the human restores the label once it is resolved.
 
 **PRD** (product requirements doc):
-In this repo, a synthesis of a finished grill whose value is entirely up-front: it denoises a
-long grill session into a clean one-page input and supplies the exhaustive user-story list the
-breakdown uses as a coverage checklist. Nobody reads it afterwards; it is stored as the body of
-the epic only because that issue exists anyway, so storing it costs nothing.
-_Avoid_: treating it as a spec anyone reads later, a `tmp/` file, or a reason to publish anything.
+In this repo, a synthesis of a finished grill, stored as the body of its epic. It is the only
+carrier of what the grill settled: the breakdown, run in a fresh session, and weryfikacja epica
+know of the grill only what the PRD says — whatever is not in it does not exist downstream. It
+also supplies the exhaustive user-story list the breakdown uses as a coverage checklist. It
+describes a change, not how the system works as a whole.
+_Avoid_: treating it as the specification of the current system; a `tmp/` file.
 
 **Epic**:
 A parent issue grouping the sub-issues produced by one breakdown; the unit of odbiór. It carries
 the PRD and the scenario for its odbiór. Its sub-issues are closed on the automated gate alone
-and carry no manual-verification section; the epic awaits odbiór once its last sub-issue closes.
+and carry no manual-verification section; once its last sub-issue closes, the epic goes through
+weryfikacja epica and only then awaits odbiór.
 Every piece of work is an epic, even a one-line change: an epic with a single sub-issue.
 _Avoid_: calling the parent "PRD" — the PRD is only what it happens to carry; the Polish "epic".
 
