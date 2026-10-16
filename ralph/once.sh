@@ -36,7 +36,7 @@ SCRIPT_DIR="$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")" && pwd)"
 
 ralph_parse_args ralph-once "$@" || exit "$RALPH_EXIT_ERROR"
 ralph_start_run_log "once${RALPH_ISSUE_ARG:+-$RALPH_ISSUE_ARG}" "$@"
-ralph_require_runtime "$RALPH_RUNTIME" || exit "$RALPH_EXIT_ERROR"
+ralph_require_claude || exit "$RALPH_EXIT_ERROR"
 ISSUE_ARG="$RALPH_ISSUE_ARG"
 
 ralph_acquire_lock "${ISSUE_ARG:-selector}" || exit "$RALPH_EXIT_ERROR"
@@ -57,7 +57,7 @@ after_worker() {
   local cost
   exit_on_limit_stop
   if [ -n "$RALPH_LAST_LOG" ]; then
-    cost=$(ralph_run_cost "$RALPH_RUNTIME" "$RALPH_LAST_LOG")
+    cost=$(ralph_run_cost "$RALPH_LAST_LOG")
     [ -n "$cost" ] && ralph_say dim "Koszt workera: $cost"
   fi
 
@@ -67,7 +67,7 @@ after_worker() {
   RALPH_REVIEW_EXIT=""
   if [ "$mode" = afk ] && [ "$complexity" = heavy ] && [ -n "$pre_head" ] \
       && [ "$(gh issue view "$num" --json state --jq '.state | ascii_downcase' 2>/dev/null)" = closed ]; then
-    ralph_heavy_review "$RALPH_RUNTIME" "$num" "$pre_head" "$issue"
+    ralph_heavy_review "$num" "$pre_head" "$issue"
   fi
   finish_run
 }
@@ -100,7 +100,7 @@ issue_text() {
 
 # Wznowienie po limicie: a valid ślad is resumed before anything else. Its dirty tree is the
 # interrupted worker's work, on the branch it was working on.
-if ralph_limit_trace_applies "$RALPH_RUNTIME" "$ISSUE_ARG"; then
+if ralph_limit_trace_applies "$ISSUE_ARG"; then
   num=$(ralph_limit_trace_get issue)
   phase=$(ralph_limit_trace_get phase)
   session=$(ralph_limit_trace_get session)
@@ -112,11 +112,11 @@ if ralph_limit_trace_applies "$RALPH_RUNTIME" "$ISSUE_ARG"; then
   ralph_say warn "Wznowienie po limicie: issue #${num} — $([ "$phase" = review ] && echo "przegląd heavy" || echo worker) przerwany przez limit użycia (sesja $session)."
   issue=$(issue_text "$num")
   if [ "$phase" = review ]; then
-    ralph_heavy_review "$RALPH_RUNTIME" "$num" "$pre_head" "$issue" "$session"
+    ralph_heavy_review "$num" "$pre_head" "$issue" "$session"
     finish_run
   fi
   RALPH_LAST_LOG=""
-  ralph_run_worker_through_limit "$RALPH_RUNTIME" "$(ralph_limit_trace_get model)" "$(ralph_limit_trace_get effort)" \
+  ralph_run_worker_through_limit "$(ralph_limit_trace_get model)" "$(ralph_limit_trace_get effort)" \
     "" "$(ralph_limit_trace_get label)" afk worker "$session"
   after_worker
 fi
@@ -147,7 +147,7 @@ fi
 # Strażnik (fail-closed): refuse to run unless this repo declares a usable "## Ralph" section
 # in the selected runtime's native contract file. On halt it prints the reason + how to fix and
 # exits non-zero, so the refusal code stops the loop (the message is already on screen).
-"$SCRIPT_DIR/preflight.sh" "$RALPH_RUNTIME"
+"$SCRIPT_DIR/preflight.sh" claude
 guard_rc=$?
 [ "$guard_rc" = "$RALPH_EXIT_USAGE_LIMIT" ] && exit "$RALPH_EXIT_USAGE_LIMIT"
 [ "$guard_rc" = 0 ] || exit "$RALPH_EXIT_ERROR"
@@ -155,7 +155,7 @@ guard_rc=$?
 # Optional epic branch (ADR 0012): a `ralph-base-branch: <base>` line in ## Ralph. Absent ->
 # trunk, the loop never switches branches. When set, a dirty tree is refused here already, so
 # no selector tokens are spent on a run that could not switch branches anyway.
-base_branch=$(ralph_contract_section "$(ralph_contract_file "$RALPH_RUNTIME")" | ralph_base_branch) || exit "$RALPH_EXIT_ERROR"
+base_branch=$(ralph_contract_section "$(ralph_contract_file claude)" | ralph_base_branch) || exit "$RALPH_EXIT_ERROR"
 if [ -n "$base_branch" ]; then
   ralph_require_clean_tree || exit "$RALPH_EXIT_ERROR"
 fi
@@ -251,11 +251,11 @@ $(ralph_blocked_report <<<"$candidates_json")"
     echo "Jedyne wolne issue: #${num} (bez selektora); ustalam etykietę complexity..."
   else
     # Stage 1 — cheap selector. Picks ONE issue number (or NO_TASK) among free issues. Tool-free,
-    #   so it reasons over the issue bodies provided above; runs through the selected runtime's
-    #   cheap/read-only adapter.
+    #   so it reasons over the issue bodies provided above; runs through the cheap
+    #   Haiku call.
     select_prompt=$(cat "$SCRIPT_DIR/select.md")
-    echo "Selektor ($(ralph_selector_model_label "$RALPH_RUNTIME")) wybiera następne zadanie... (chwilę trwa)"
-    selection=$(ralph_run_model_capture "$RALPH_RUNTIME" selector \
+    echo "Selektor ($(ralph_selector_model_label)) wybiera następne zadanie... (chwilę trwa)"
+    selection=$(ralph_run_model_capture selector \
       "Previous commits: $commits Issues: $issues $select_prompt")
     [ "$?" = "$RALPH_EXIT_USAGE_LIMIT" ] && exit "$RALPH_EXIT_USAGE_LIMIT"
     num=$(printf '%s' "$selection" | grep -Eo 'NO_TASK|[0-9]+' | head -1)
@@ -278,12 +278,12 @@ labels=$(gh issue view "$num" --json labels --jq '.labels[].name' 2>/dev/null)
 complexity=$(printf '%s\n' "$labels" | sed -n 's/^complexity://p' | head -1)
 complexity="${complexity:-normal}"
 
-ralph_model_for_complexity "$RALPH_RUNTIME" "$complexity"
+ralph_model_for_complexity "$complexity"
 model="$RALPH_MODEL"
 effort="$RALPH_EFFORT"
 
 [ -n "${RALPH_ISSUE_FILE:-}" ] && printf '%s\n' "$num" > "$RALPH_ISSUE_FILE"
-echo "Wybrane issue #${num} (complexity:${complexity}) -> $(ralph_model_display "$RALPH_RUNTIME" "$model" "$effort")${RALPH_FORCE_MODEL:+, wymuszone --force-model}"
+echo "Wybrane issue #${num} (complexity:${complexity}) -> $(ralph_model_display "$model" "$effort")${RALPH_FORCE_MODEL:+, wymuszone --force-model}"
 
 # 4. Epic branch: put the repo on epic/<parent> (merging the base in) or on the base for an
 #    issue without a parent. The run ends on that branch, ready for local acceptance.
@@ -320,23 +320,22 @@ mode=$(ralph_worker_mode <<<"$labels")
 if [ "$mode" = "hitl" ]; then
   ralph_say warn "Issue #${num} nie ma ready-for-agent — to HITL: otwieram sesję interaktywną z człowiekiem."
   [ -n "${RALPH_NOTIFY_HITL:-}" ] && ralph_notify "Ralph: sesja HITL" "Issue #${num} czeka na Ciebie."
-  prompt=$(ralph_render_prompt "$RALPH_RUNTIME" "$SCRIPT_DIR/prompt-hitl.md")
+  prompt=$(ralph_render_prompt "$SCRIPT_DIR/prompt-hitl.md")
 else
-  prompt=$(ralph_render_prompt "$RALPH_RUNTIME" "$SCRIPT_DIR/prompt.md")
+  prompt=$(ralph_render_prompt "$SCRIPT_DIR/prompt.md")
 fi
 
-echo "Zaczynam implementację issue #${num} przez runtime ${RALPH_RUNTIME} na $(ralph_model_display "$RALPH_RUNTIME" "$model" "$effort")..."
+echo "Zaczynam implementację issue #${num} przez Claude na $(ralph_model_display "$model" "$effort")..."
 # Claude runs unattended via `claude -p` (stream-json; see ralph_run_claude_worker) and ends on
 # its own once the issue is closed out. It uses `auto` (not `acceptEdits`): acceptEdits auto-approves file edits ONLY, so every
 # Bash call outside the user's allowlist — `git commit`, `gh issue close`, the ## Ralph feedback
 # loops — still stops for approval, and an AFK loop hangs. Auto mode is Claude Code's default:
-# a classifier vets each tool call for risk and prompt injection. Codex runs unattended too, via
-# `codex exec --json --approve-for-me` (see ralph_run_codex_worker). HITL issues (no ready-for-agent)
-# get the interactive CLI of either runtime instead.
+# a classifier vets each tool call for risk and prompt injection. HITL issues (no ready-for-agent)
+# get the interactive CLI instead.
 pre_head=$(git rev-parse HEAD 2>/dev/null)
 RALPH_LAST_LOG=""
 # What a ślad needs beyond the session, should a usage limit cut this run off (ADR 0017).
 RALPH_LIMIT_CONTEXT=$(printf 'issue=%s\npre_head=%s\ncomplexity=%s' "$num" "$pre_head" "$complexity")
-ralph_run_worker_through_limit "$RALPH_RUNTIME" "$model" "$effort" \
+ralph_run_worker_through_limit "$model" "$effort" \
   "Previous commits: $commits Issue to work (work ONLY this one): $issue $prompt" "issue-${num}" "$mode" worker
 after_worker

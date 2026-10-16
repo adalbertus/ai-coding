@@ -12,14 +12,14 @@ ralph_usage() {
   local launcher="$1"
   case "$launcher" in
     ralph-once-local)
-      echo "Użycie: ralph-once-local [claude|codex] [--force-model=sonnet|opus]"
+      echo "Użycie: ralph-once-local [claude] [--force-model=sonnet|opus]"
       ;;
     ralph-epic)
-      echo "Użycie: ralph-epic [claude|codex] [numer-epicu] [--force-model=sonnet|opus]"
+      echo "Użycie: ralph-epic [claude] [numer-epicu] [--force-model=sonnet|opus]"
       ;;
     *)
-      echo "Użycie: ralph-once [claude|codex] [numer-issue] [--force-model=sonnet|opus]"
-      echo "       ralph-once [numer-issue]  # wstecznie kompatybilne: Claude"
+      echo "Użycie: ralph-once [claude] [numer-issue] [--force-model=sonnet|opus]"
+      echo "       ralph-once [numer-issue]  # claude jest domyślny i można go pominąć"
       ;;
   esac
   echo "  --force-model=sonnet|opus  jeden model Claude z effort high dla każdego issue,"
@@ -30,7 +30,7 @@ ralph_parse_args() {
   local launcher="$1"
   shift
 
-  RALPH_RUNTIME="${RALPH_DEFAULT_RUNTIME:-claude}"
+  RALPH_RUNTIME=claude
   RALPH_ISSUE_ARG=""
   RALPH_FORCE_MODEL=""
 
@@ -44,9 +44,11 @@ ralph_parse_args() {
   done
   set -- ${rest[@]+"${rest[@]}"}
 
-  if [ "${1:-}" = "claude" ] || [ "${1:-}" = "codex" ]; then
-    RALPH_RUNTIME="$1"
+  if [ "${1:-}" = "claude" ]; then
     shift
+  elif [ "${1:-}" = "codex" ]; then
+    echo "Codex nie uruchamia już Ralpha (ADR 0020). Użyj Claude: pomiń argument albo podaj 'claude'." >&2
+    return 1
   fi
 
   case "$launcher" in
@@ -63,7 +65,7 @@ ralph_parse_args() {
       fi
       RALPH_ISSUE_ARG="${1:-}"
       if [ -n "$RALPH_ISSUE_ARG" ] && ! printf '%s' "$RALPH_ISSUE_ARG" | grep -qE '^[0-9]+$'; then
-        echo "Argument '${RALPH_ISSUE_ARG}' nie jest runtime'em ani numerem issue." >&2
+        echo "Argument '${RALPH_ISSUE_ARG}' nie jest ani 'claude', ani numerem issue." >&2
         ralph_usage "$launcher" >&2
         return 1
       fi
@@ -78,10 +80,6 @@ ralph_parse_args() {
       return 1
       ;;
   esac
-  if [ -n "$force" ] && [ "$RALPH_RUNTIME" != claude ]; then
-    echo "--force-model działa tylko z runtime'em claude (sonnet i opus to modele Claude)." >&2
-    return 1
-  fi
   RALPH_FORCE_MODEL="$force"
 }
 
@@ -89,67 +87,6 @@ ralph_contract_file() {
   case "$1" in
     codex) echo "AGENTS.md" ;;
     *) echo "CLAUDE.md" ;;
-  esac
-}
-
-ralph_skill_tdd() {
-  case "$1" in
-    codex) echo '$tdd' ;;
-    *) echo '/tdd' ;;
-  esac
-}
-
-# Body of the EXPLORATION section, rendered per runtime. The two branches are separate prose,
-# not one text with holes: "search, then read the matching range" is one tool with two parameters
-# under Claude Code and two shell commands under Codex, so the sentences differ in shape, not just
-# in nouns. Quoted heredocs — the prose contains backticks and must not be expanded. {…}
-# placeholders inside are resolved by ralph_render_prompt after this is spliced in.
-ralph_explore_guidance() {
-  case "$1" in
-    codex)
-      cat <<'EOF'
-Explore the repo. Note its structure and conventions ({AGENT_CONTRACT_FILE}), and the existing tests that
-the `## Ralph` feedback loops run.
-
-**Search before you read.** `cat`-ing a large reference file (a glossary, a big module) into
-context can cost tens of thousands of tokens, and every one of them stays in context for the rest
-of the run — degrading your own reasoning exactly when the implementation needs it. Reading a file
-whole is the easiest way to run this loop out of context. So read in two steps:
-
-1. **Locate the lines** — `rg -n '<pattern>' <path>` (or `grep -rn '<pattern>' <path>` where `rg`
-   is not installed). This gives you the file and the line numbers, not the file.
-2. **Read only that range** — `sed -n '<start>,<end>p' <file>`, with a window of a few dozen lines
-   around the hit. If the range turns out to be too narrow, widen it or search again. Two targeted
-   reads still cost a fraction of the whole file.
-
-Use `cat` only on a file you already know is short — `wc -l <file>` when unsure. Never `cat` a
-glossary, a contract file, or a directory-wide glob.
-
-This is how to read an instruction like "read `CONTEXT.md` before introducing a new term" in a
-repo's {AGENT_CONTRACT_FILE}: **consult** that file for what you need. Do not pull all of it into context.
-EOF
-      ;;
-    *)
-      cat <<'EOF'
-Explore the repo. Note its structure and conventions ({AGENT_CONTRACT_FILE}), and the existing tests that
-the `## Ralph` feedback loops run.
-
-**Search before you read.** A full `Read` of a large reference file (a glossary, a big module)
-can cost tens of thousands of tokens, and every one of them stays in context for the rest of the
-run — degrading your own reasoning exactly when the implementation needs it. So:
-
-- **If you can name what you are looking for** — a term, a symbol, a function, a path — use
-  `Grep`/`Glob`, then `Read` only the matching range (`offset`/`limit`). This is the default, and
-  it is not a compromise: it returns the exact source text, just less of it.
-- **Only if you cannot formulate a search pattern**, because you need an overview rather than a
-  specific fact, delegate to the `Explore` subagent. It reads in its own context and returns
-  conclusions. It costs a full extra model run and gives you a paraphrase instead of the source,
-  so it earns its keep for open-ended reconnaissance and nothing else.
-
-This is how to read an instruction like "read `CONTEXT.md` before introducing a new term" in a
-repo's {AGENT_CONTRACT_FILE}: **consult** that file for what you need. Do not pull all of it into context.
-EOF
-      ;;
   esac
 }
 
@@ -164,16 +101,7 @@ ralph_contract_section() {
 }
 
 ralph_render_prompt() {
-  local runtime="$1" prompt_file="$2" content contract_file skill_tdd explore
-  contract_file="$(ralph_contract_file "$runtime")"
-  skill_tdd="$(ralph_skill_tdd "$runtime")"
-  explore="$(ralph_explore_guidance "$runtime")"
-  content=$(cat "$prompt_file")
-  # EXPLORE_GUIDANCE first: the spliced-in prose carries {AGENT_CONTRACT_FILE} of its own.
-  content=${content//\{EXPLORE_GUIDANCE\}/$explore}
-  content=${content//\{AGENT_CONTRACT_FILE\}/$contract_file}
-  content=${content//\{SKILL_TDD\}/$skill_tdd}
-  printf '%s\n' "$content"
+  cat "$1"
 }
 
 # --- Screen and run log ---
@@ -240,118 +168,75 @@ ralph_start_run_log() {
   exit "$rc"
 }
 
-ralph_require_runtime() {
-  local runtime="$1"
-  case "$runtime" in
-    claude|codex) ;;
-    *)
-      echo "Nieznany runtime: $runtime (dozwolone: claude, codex)" >&2
-      return 1
-      ;;
-  esac
-
-  if ! command -v "$runtime" >/dev/null 2>&1; then
-    echo "Brak komendy '$runtime' w PATH." >&2
+ralph_require_claude() {
+  if ! command -v claude >/dev/null 2>&1; then
+    echo "Brak komendy 'claude' w PATH." >&2
     return 1
   fi
 }
 
 ralph_selector_model_label() {
-  case "$1" in
-    codex) echo "Codex config default" ;;
-    *) echo "claude-haiku-4-5" ;;
-  esac
+  echo "claude-haiku-4-5"
 }
 
 ralph_model_for_complexity() {
-  local runtime="$1" complexity="$2"
+  local complexity="$1"
   RALPH_MODEL=""
   RALPH_EFFORT=""
 
-  case "$runtime:$complexity" in
+  case "$complexity" in
     # heavy: the normal-tier model at high effort; the stronger model only reviews the result
     # afterwards (ralph_review_model, ADR 0016).
-    claude:heavy)   RALPH_MODEL="sonnet"; RALPH_EFFORT="high" ;;
+    heavy)   RALPH_MODEL="sonnet"; RALPH_EFFORT="high" ;;
     # Not Haiku: the worker needs auto mode, which Claude Code does not offer on Haiku; without
     # it every Bash call waits for approval and the AFK loop stalls.
-    claude:trivial) RALPH_MODEL="sonnet"; RALPH_EFFORT="low" ;;
-    claude:*)       RALPH_MODEL="sonnet"; RALPH_EFFORT="medium" ;;
-
-    codex:heavy)   RALPH_MODEL="${RALPH_CODEX_MODEL_NORMAL:-${RALPH_CODEX_MODEL:-}}"; RALPH_EFFORT="${RALPH_CODEX_EFFORT_HEAVY:-high}" ;;
-    codex:trivial) RALPH_MODEL="${RALPH_CODEX_MODEL_TRIVIAL:-${RALPH_CODEX_MODEL:-}}"; RALPH_EFFORT="${RALPH_CODEX_EFFORT_TRIVIAL:-low}" ;;
-    codex:*)       RALPH_MODEL="${RALPH_CODEX_MODEL_NORMAL:-${RALPH_CODEX_MODEL:-}}"; RALPH_EFFORT="${RALPH_CODEX_EFFORT_NORMAL:-medium}" ;;
+    trivial) RALPH_MODEL="sonnet"; RALPH_EFFORT="low" ;;
+    *)       RALPH_MODEL="sonnet"; RALPH_EFFORT="medium" ;;
   esac
 
   # --force-model: one Claude model for every tier, always at high effort.
-  if [ -n "${RALPH_FORCE_MODEL:-}" ] && [ "$runtime" = claude ]; then
+  if [ -n "${RALPH_FORCE_MODEL:-}" ]; then
     RALPH_MODEL="$RALPH_FORCE_MODEL"
     RALPH_EFFORT="high"
   fi
 }
 
-# The model for the przegląd heavy: the runtime's strongest tier. Not affected by --force-model —
-# the review follows the label alone.
+# The model for the przegląd heavy: the strongest tier. Not affected by --force-model — the review
+# follows the label alone.
 ralph_review_model() {
-  local runtime="$1"
-  case "$runtime" in
-    codex) RALPH_REVIEW_MODEL="${RALPH_CODEX_MODEL_HEAVY:-${RALPH_CODEX_MODEL:-}}"; RALPH_REVIEW_EFFORT="${RALPH_CODEX_EFFORT_REVIEW:-high}" ;;
-    *)     RALPH_REVIEW_MODEL="opus"; RALPH_REVIEW_EFFORT="high" ;;
-  esac
+  RALPH_REVIEW_MODEL="opus"
+  RALPH_REVIEW_EFFORT="high"
 }
 
 ralph_model_display() {
-  local runtime="$1" model="$2" effort="$3"
-  case "$runtime" in
-    codex)
-      if [ -n "$model" ]; then
-        echo "$model (reasoning:${effort:-config})"
-      else
-        echo "Codex config default (reasoning:${effort:-config})"
-      fi
-      ;;
-    *)
-      echo "$model (effort:${effort})"
-      ;;
-  esac
+  echo "$1 (effort:$2)"
 }
 
-# A one-shot model call (strażnik, selektor): its answer on stdout, the runtime's own stderr
+# A one-shot model call (strażnik, selektor): its answer on stdout, Claude's own stderr
 # dropped. Claude streams JSON so a usage limit shows in a field (ADR 0017): the call waits for the
 # reset (messages on stderr) and is repeated; a reset too far away -> rc RALPH_EXIT_USAGE_LIMIT.
 ralph_run_model_capture() {
-  local runtime="$1" purpose="$2" prompt="$3"
-
-  case "$runtime" in
-    claude)
-      local model="claude-haiku-4-5-20251001" out rc hit reset type waits=0
-      while :; do
-        out=$(claude -p --model "$model" --effort low --output-format stream-json --verbose "$prompt" 2>/dev/null)
-        rc=$?
-        hit=$(ralph_stream_usage_limit <<<"$out")
-        if [ -z "$hit" ]; then
-          jq -R 'fromjson? // empty' <<<"$out" 2>/dev/null \
-            | jq -s -r '[.[] | select(.type == "result" and .is_error != true) | .result] | last // empty'
-          return "$rc"
-        fi
-        read -r reset type <<<"$hit"
-        waits=$((waits + 1))
-        if [ "$waits" -gt "$RALPH_LIMIT_MAX_WAITS" ] || ! ralph_wait_for_reset "$reset" "$type" >&2; then
-          ralph_say warn "⏸ Limit użycia ($type) — reset: $([ "${reset:-0}" -gt 0 ] && ralph_clock "$reset" || echo "nieznana godzina"), za daleko, żeby czekać. Uruchom ponownie po resecie." >&2
-          return "$RALPH_EXIT_USAGE_LIMIT"
-        fi
-      done
-      ;;
-    codex)
-      codex -a never exec --ephemeral -s read-only -C "$PWD" "$prompt" 2>/dev/null
-      ;;
-    *)
-      echo "Nieznany runtime: $runtime" >&2
-      return 1
-      ;;
-  esac
+  local purpose="$1" prompt="$2"
+  local model="claude-haiku-4-5-20251001" out rc hit reset type waits=0
+  while :; do
+    out=$(claude -p --model "$model" --effort low --output-format stream-json --verbose "$prompt" 2>/dev/null)
+    rc=$?
+    hit=$(ralph_stream_usage_limit <<<"$out")
+    if [ -z "$hit" ]; then
+      jq -R 'fromjson? // empty' <<<"$out" 2>/dev/null \
+        | jq -s -r '[.[] | select(.type == "result" and .is_error != true) | .result] | last // empty'
+      return "$rc"
+    fi
+    read -r reset type <<<"$hit"
+    waits=$((waits + 1))
+    if [ "$waits" -gt "$RALPH_LIMIT_MAX_WAITS" ] || ! ralph_wait_for_reset "$reset" "$type" >&2; then
+      ralph_say warn "⏸ Limit użycia ($type) — reset: $([ "${reset:-0}" -gt 0 ] && ralph_clock "$reset" || echo "nieznana godzina"), za daleko, żeby czekać. Uruchom ponownie po resecie." >&2
+      return "$RALPH_EXIT_USAGE_LIMIT"
+    fi
+  done
 }
 
-# jq definitions shared by both stream renderers. Expect $color ("1" = ANSI on), $w (terminal
+# jq definitions used by the stream renderer. Expect $color ("1" = ANSI on), $w (terminal
 # width, 0 = do not clip) and $cwd (stripped from paths).
 RALPH_RENDER_JQ_DEFS='
   def clip: if $w > 0 and length > $w then .[0:$w - 1] + "…" else . end;
@@ -491,101 +376,6 @@ ralph_run_claude_worker() {
   return "$rc"
 }
 
-# stdin: Codex `exec --json` lines -> stdout: what the worker is doing, for a human. A pure
-# filter, same look as ralph_render_stream: agent messages are the narration (`› …`), steps are
-# dimmed one-liners clipped to the terminal width — command runs `▸ Bash: cmd` (a failed one red,
-# `✗ Bash (exit N): cmd`), file changes `▸ Edit: path` (add -> Write), MCP calls and web searches.
-# The last agent message of a turn is printed as the report once the turn completes. Everything
-# else (thread/turn bookkeeping, reasoning, unknown events, unparseable lines) is skipped. Steps
-# are rendered on completion.
-ralph_render_codex_stream() {
-  jq -n -R --unbuffered -r --arg cwd "$PWD/" --arg color "${RALPH_COLOR:-0}" \
-    --arg title "${RALPH_REPORT_TITLE:-Raport workera}" \
-    --argjson w "$(ralph_term_cols)" "$RALPH_RENDER_JQ_DEFS"'
-    def flush: if .last != null then .out += [.last | narr] | .last = null else . end;
-    foreach (inputs | (fromjson? // empty)) as $e ({last: null, out: []};
-      .out = []
-      | if $e.type == "item.completed" then
-          ($e.item // {}) as $i
-          | if $i.type == "agent_message" and ($i.text | type) == "string" then
-              flush | .last = $i.text
-            elif $i.type == "command_execution" then
-              flush
-              | .out += [if ($i.exit_code // 0) != 0
-                         then "✗ Bash (exit \($i.exit_code)): \(($i.command // "") | line1)" | bad
-                         else "▸ Bash: \(($i.command // "") | line1)" | step end]
-            elif $i.type == "file_change" then
-              flush
-              | .out += [($i.changes // [])[]?
-                         | "▸ \(if .kind == "add" then "Write" elif .kind == "delete" then "Delete" else "Edit" end): \((.path // "") | line1)"
-                         | step]
-            elif $i.type == "mcp_tool_call" then
-              flush | .out += ["▸ MCP: \($i.server // "")/\($i.tool // "")" | step]
-            elif $i.type == "web_search" then
-              flush | .out += ["▸ WebSearch: \(($i.query // "") | line1)" | step]
-            else . end
-        elif $e.type == "turn.completed" and .last != null then
-          .out += ["\n── " + $title + " ──\n" + .last] | .last = null
-        else . end;
-      .out[])'
-}
-
-# $1: a Codex JSONL log file -> the thread id to hand to `codex resume`.
-ralph_codex_thread_id() {
-  jq -R -r 'fromjson? | select(.type == "thread.started") | .thread_id' "$1" 2>/dev/null | tail -n 1
-}
-
-# Codex worker, unattended: `codex exec --json` with auto-review. Same shape as the Claude
-# worker: full JSONL in <git dir>/ralph-logs/, one line per step on screen, a resume line at the
-# end. The session is persisted (no --ephemeral) so it can be resumed. $5 is accepted for
-# symmetry with the Claude worker but not enforced: a read-only sandbox would also stop the
-# przegląd from running tests, so its prompt alone forbids edits. Log path -> RALPH_LAST_LOG.
-ralph_run_codex_worker() {
-  local model="$1" effort="$2" prompt="$3" label="${4:-run}"
-  local dir log rc id
-  dir=$(git rev-parse --git-path ralph-logs 2>/dev/null) || dir=""
-  if [ -n "$dir" ] && mkdir -p "$dir" 2>/dev/null; then
-    log="$dir/$(date +%Y%m%d-%H%M%S)-${label}.jsonl"
-  else
-    log=$(mktemp)
-  fi
-
-  local args=(exec --json --approve-for-me -C "$PWD")
-  [ -n "$model" ] && args+=(-m "$model")
-  [ -n "$effort" ] && args+=(-c "model_reasoning_effort=\"$effort\"")
-  # stderr carries Codex's banner and its tool errors (e.g. a tool host that fails to start),
-  # which never reach the JSONL: keep it next to the log instead of discarding it.
-  local err="${log%.jsonl}.stderr.log"
-  RALPH_LAST_LOG="$log"
-  codex "${args[@]}" "$prompt" 2>"$err" \
-    | tee "$log" | ralph_render_codex_stream
-  rc=${PIPESTATUS[0]}
-
-  echo
-  ralph_say dim "Zapis runu: $log"
-  if grep -q 'ERROR' "$err" 2>/dev/null; then
-    ralph_say err "Codex zgłosił błędy (stderr): $err
-$(grep 'ERROR' "$err" | sort -u -k2 | head -3 | sed 's/^/  /')"
-  fi
-  id=$(ralph_codex_thread_id "$log")
-  [ -n "$id" ] && ralph_say dim "Wznów sesję: codex resume $id"
-  return "$rc"
-}
-
-# Codex HITL session: the interactive CLI with auto-review, so the human can interrupt or add
-# instructions mid-run.
-ralph_run_codex_interactive() {
-  local model="$1" effort="$2" prompt="$3"
-  local args=(--no-alt-screen --approve-for-me -C "$PWD")
-  [ -n "$model" ] && args+=(-m "$model")
-  [ -n "$effort" ] && args+=(-c "model_reasoning_effort=\"$effort\"")
-  if [ "${RALPH_TERM_FDS:-}" = 1 ]; then
-    codex "${args[@]}" "$prompt" >&3 2>&4
-  else
-    codex "${args[@]}" "$prompt"
-  fi
-}
-
 # stdin: an issue's label names, one per line -> `afk` (has ready-for-agent: unattended) or
 # `hitl` (does not: a human is present, the worker runs interactively).
 ralph_worker_mode() {
@@ -604,32 +394,17 @@ ralph_run_claude_interactive() {
   fi
 }
 
-# $6: mode, `afk` (default, unattended), `hitl` (interactive session with a human present) or
+# $5: mode, `afk` (default, unattended), `hitl` (interactive session with a human present) or
 # `review` (unattended, without file-editing tools: the przegląd heavy).
 ralph_run_worker() {
-  local runtime="$1" model="$2" effort="$3" prompt="$4" label="${5:-}" mode="${6:-afk}" access=""
+  local model="$1" effort="$2" prompt="$3" label="${4:-}" mode="${5:-afk}" access=""
   [ "$mode" = review ] && access=readonly
 
-  case "$runtime" in
-    claude)
-      if [ "$mode" = "hitl" ]; then
-        ralph_run_claude_interactive "$model" "$effort" "$prompt"
-      else
-        ralph_run_claude_worker "$model" "$effort" "$prompt" "$label" "$access"
-      fi
-      ;;
-    codex)
-      if [ "$mode" = "hitl" ]; then
-        ralph_run_codex_interactive "$model" "$effort" "$prompt"
-      else
-        ralph_run_codex_worker "$model" "$effort" "$prompt" "$label" "$access"
-      fi
-      ;;
-    *)
-      echo "Nieznany runtime: $runtime" >&2
-      return 1
-      ;;
-  esac
+  if [ "$mode" = "hitl" ]; then
+    ralph_run_claude_interactive "$model" "$effort" "$prompt"
+  else
+    ralph_run_claude_worker "$model" "$effort" "$prompt" "$label" "$access"
+  fi
 }
 
 # --- Limit użycia (ADR 0017): a Claude run stopped by an exhausted usage window is resumed, ---
@@ -727,15 +502,17 @@ ralph_limit_trace_stale() {
   esac
 }
 
-# Should this run resume from the ślad? $1: runtime; $2: the issue/epic argument (may be empty).
-# rc 0 = resume. rc 1 = run as usual: no ślad; a ślad of another runtime or issue (left alone);
-# GitHub did not answer (left alone); or a stale ślad (removed, one line on screen).
+# Should this run resume from the ślad? $1: the issue/epic argument (may be empty).
+# rc 0 = resume. rc 1 = run as usual: no ślad; a ślad of another issue (left alone); GitHub did
+# not answer (left alone); or a stale ślad, including one left by the retired Codex runtime
+# (removed, one line on screen).
 ralph_limit_trace_applies() {
-  local runtime="$1" arg="$2" f issue state ready reason
+  local arg="$1" f issue state ready reason
   f=$(ralph_limit_trace_path) && [ -f "$f" ] || return 1
   issue=$(ralph_limit_trace_get issue)
-  if [ "$runtime" != "$(ralph_limit_trace_get runtime)" ]; then
-    ralph_say dim "Ślad limitu użycia (issue #${issue}) dotyczy innego runtime'u — zostawiam go: $f"
+  if [ "$(ralph_limit_trace_get runtime)" != claude ]; then
+    ralph_say dim "Usuwam ślad limitu użycia (issue #${issue}) z runtime'u, którego Ralph już nie uruchamia."
+    ralph_limit_trace_clear
     return 1
   fi
   if [ -n "$arg" ] && [ "$arg" != "$issue" ] && [ "$arg" != "$(ralph_issue_parent "$issue" 2>/dev/null)" ]; then
@@ -766,16 +543,16 @@ ralph_limit_stop_message() {
 przerwaną sesję, a niezacommitowane zmiany w drzewie są wtedy w porządku."
 }
 
-# Runs a worker (as ralph_run_worker) and carries a Claude run over a usage limit (ADR 0017): on
+# Runs a worker (as ralph_run_worker) and carries the run over a usage limit (ADR 0017): on
 # a limit it writes the ślad, waits for the reset when it is close enough and resumes the same
 # session, as often as needed up to RALPH_LIMIT_MAX_WAITS. A run that ends on its own removes the
-# ślad. $1-$6 as ralph_run_worker; $7: phase recorded in the ślad (worker|review); $8: a session
+# ślad. $1-$5 as ralph_run_worker; $6: phase recorded in the ślad (worker|review); $7: a session
 # to resume (a restart from the ślad), waiting for its reset first. The ślad also gets the
 # caller's RALPH_LIMIT_CONTEXT (key=value lines). Sets RALPH_LIMIT_STOP: empty = the run ended on
 # its own; `limit` = stopped on a limit it could not wait out; `resume-failed` = the runtime did
 # not take the session up. In both the ślad stays and the message is printed. rc: the last run's.
 ralph_run_worker_through_limit() {
-  local runtime="$1" model="$2" effort="$3" prompt="$4" label="$5" mode="${6:-afk}" phase="${7:-worker}" session="${8:-}"
+  local model="$1" effort="$2" prompt="$3" label="$4" mode="${5:-afk}" phase="${6:-worker}" session="${7:-}"
   local rc=0 hit reset type waits=0 access=""
   [ "$mode" = review ] && access=readonly
   RALPH_LIMIT_STOP=""
@@ -800,10 +577,10 @@ Zapis próby: $RALPH_LAST_LOG
         return "$rc"
       fi
     else
-      ralph_run_worker "$runtime" "$model" "$effort" "$prompt" "$label" "$mode"
+      ralph_run_worker "$model" "$effort" "$prompt" "$label" "$mode"
       rc=$?
     fi
-    { [ "$runtime" = claude ] && [ "$mode" != hitl ] && [ -n "$RALPH_LAST_LOG" ]; } || return "$rc"
+    { [ "$mode" != hitl ] && [ -n "$RALPH_LAST_LOG" ]; } || return "$rc"
     hit=$(ralph_stream_usage_limit "$RALPH_LAST_LOG")
     if [ -z "$hit" ]; then
       # A session here means this call wrote or was handed the ślad; leave anyone else's alone.
@@ -814,7 +591,7 @@ Zapis próby: $RALPH_LAST_LOG
     session=$(ralph_stream_session_id "$RALPH_LAST_LOG")
     # Nothing to resume without a session: the run counts as it always did.
     [ -n "$session" ] || return "$rc"
-    ralph_limit_trace_write "runtime=$runtime" "phase=$phase" "session=$session" "model=$model" \
+    ralph_limit_trace_write "runtime=claude" "phase=$phase" "session=$session" "model=$model" \
       "effort=$effort" "label=$label" "resets_at=$reset" "limit=$type" \
       "branch=$(git branch --show-current 2>/dev/null)"
     waits=$((waits + 1))
@@ -1059,31 +836,19 @@ ralph_review_action() {
   esac
 }
 
-# Pure. $1: runtime, $2: a worker's stream log -> its final report text (Claude: the last
-# non-error `result`; Codex: the last agent message).
+# Pure. $1: a worker's stream log -> its final report text (the last non-error `result`).
 ralph_last_report() {
-  case "$1" in
-    codex) jq -R 'fromjson? // empty' "$2" 2>/dev/null \
-             | jq -s -r '[.[] | select(.type == "item.completed" and .item.type == "agent_message") | .item.text] | last // ""' ;;
-    *)     jq -R 'fromjson? // empty' "$2" 2>/dev/null \
-             | jq -s -r '[.[] | select(.type == "result" and .is_error != true) | .result] | last // ""' ;;
-  esac
+  jq -R 'fromjson? // empty' "$1" 2>/dev/null \
+    | jq -s -r '[.[] | select(.type == "result" and .is_error != true) | .result] | last // ""'
 }
 
-# Pure. $1: runtime, $2: a worker's stream log -> what the run cost, for a human, or nothing when
-# the log carries no such data. Claude reports `total_cost_usd` per `result`; it is cumulative
-# for the session, and max never double-counts either way. Codex reports tokens per turn.
+# Pure. $1: a worker's stream log -> what the run cost, for a human, or nothing when the log
+# carries no such data. Claude reports `total_cost_usd` per `result`; it is cumulative for the
+# session, and max never double-counts either way.
 ralph_run_cost() {
-  case "$1" in
-    codex) jq -R 'fromjson? // empty' "$2" 2>/dev/null | jq -s -r '
-             [.[] | select(.type == "turn.completed") | .usage // empty]
-             | if length == 0 then "" else
-                 "tokeny: wejście \(map(.input_tokens // 0) | add) (w tym cache \(map(.cached_input_tokens // 0) | add)), wyjście \(map(.output_tokens // 0) | add)"
-               end' ;;
-    *)     jq -R 'fromjson? // empty' "$2" 2>/dev/null | jq -s -r '
-             [.[] | select(.type == "result") | .total_cost_usd // empty] | max
-             | if . == null then "" else "$" + ((. * 100 | round) / 100 | tostring) end' ;;
-  esac
+  jq -R 'fromjson? // empty' "$1" 2>/dev/null | jq -s -r '
+    [.[] | select(.type == "result") | .total_cost_usd // empty] | max
+    | if . == null then "" else "$" + ((. * 100 | round) / 100 | tostring) end'
 }
 
 # Failed przeglądy recorded on issue $1 so far; 0 when GitHub cannot answer.
@@ -1102,25 +867,25 @@ ralph_review_notes() {
 }
 
 # Runs the przegląd heavy of closed issue $2 over the commits $3..HEAD, then acts on the verdict.
-# $1: runtime, $4: the issue as the worker got it, $5: a przegląd session to resume (a restart
+# $3: the issue as the worker got it, $4: a przegląd session to resume (a restart
 # from the ślad, ADR 0017). Leaves in RALPH_REVIEW_EXIT the exit code once.sh should report
 # instead of the issue's state, or nothing when the przegląd accepted it. A przegląd stopped by a
 # usage limit gives no verdict and touches nothing: the issue stays closed, the ślad remembers it.
 ralph_heavy_review() {
-  local runtime="$1" num="$2" base="$3" issue="$4" session="${5:-}" prompt report verdict prior action cost body
+  local num="$1" base="$2" issue="$3" session="${4:-}" prompt report verdict prior action cost body
   RALPH_REVIEW_EXIT=""
-  ralph_review_model "$runtime"
-  prompt=$(ralph_render_prompt "$runtime" "$SCRIPT_DIR/prompt-review.md")
-  ralph_say dim "Przegląd heavy issue #${num} na $(ralph_model_display "$runtime" "$RALPH_REVIEW_MODEL" "$RALPH_REVIEW_EFFORT")..."
+  ralph_review_model
+  prompt=$(ralph_render_prompt "$SCRIPT_DIR/prompt-review.md")
+  ralph_say dim "Przegląd heavy issue #${num} na $(ralph_model_display "$RALPH_REVIEW_MODEL" "$RALPH_REVIEW_EFFORT")..."
   RALPH_LAST_LOG=""
-  RALPH_REPORT_TITLE="Raport przeglądu" ralph_run_worker_through_limit "$runtime" "$RALPH_REVIEW_MODEL" "$RALPH_REVIEW_EFFORT" \
+  RALPH_REPORT_TITLE="Raport przeglądu" ralph_run_worker_through_limit "$RALPH_REVIEW_MODEL" "$RALPH_REVIEW_EFFORT" \
     "Issue under review: $issue Commit range to review: ${base}..HEAD $prompt" "review-${num}" review review "$session"
   case "$RALPH_LIMIT_STOP" in
     limit) RALPH_REVIEW_EXIT="$RALPH_EXIT_USAGE_LIMIT"; return 0 ;;
     resume-failed) RALPH_REVIEW_EXIT="$RALPH_EXIT_ERROR"; return 0 ;;
   esac
-  report=""; [ -n "$RALPH_LAST_LOG" ] && report=$(ralph_last_report "$runtime" "$RALPH_LAST_LOG")
-  cost=""; [ -n "$RALPH_LAST_LOG" ] && cost=$(ralph_run_cost "$runtime" "$RALPH_LAST_LOG")
+  report=""; [ -n "$RALPH_LAST_LOG" ] && report=$(ralph_last_report "$RALPH_LAST_LOG")
+  cost=""; [ -n "$RALPH_LAST_LOG" ] && cost=$(ralph_run_cost "$RALPH_LAST_LOG")
   [ -n "$cost" ] && ralph_say dim "Koszt przeglądu: $cost"
   verdict=$(ralph_review_verdict <<<"$report")
   prior=$(ralph_review_fail_count "$num")

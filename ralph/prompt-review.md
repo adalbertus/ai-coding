@@ -15,7 +15,7 @@ them.
 - Do not modify any file, do not commit, do not touch git state (no checkout, reset, stash).
 - Do not call `gh` or change anything on GitHub. The loop acts on your verdict.
 - You may read any file and run the repo's tests. The feedback-loop commands are in the
-  `## Ralph` section of {AGENT_CONTRACT_FILE}; use exactly those.
+  `## Ralph` section of CLAUDE.md; use exactly those.
 
 # WHAT TO CHECK
 

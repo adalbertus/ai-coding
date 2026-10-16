@@ -95,8 +95,8 @@ gate_rc=0
 if [ -n "${RALPH_GATE_CMD:-}" ]; then
   verdict=$($RALPH_GATE_CMD 2>/dev/null); gate_rc=$?
 else
-  echo "Strażnik ($(ralph_selector_model_label "$runtime")): weryfikuję sekcję ## Ralph... (chwilę trwa)" >&2
-  verdict=$(ralph_run_model_capture "$runtime" guard "$gate_prompt"); gate_rc=$?
+  echo "Strażnik ($(ralph_selector_model_label)): weryfikuję sekcję ## Ralph... (chwilę trwa)" >&2
+  verdict=$(ralph_run_model_capture guard "$gate_prompt"); gate_rc=$?
 fi
 
 # A usage limit says nothing about the section either; the wait (or why there was none) is already

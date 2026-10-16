@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# ralph-epic [claude|codex] [nr] [--force-model=sonnet|opus]: carries one epic from start to acceptance by repeating
+# ralph-epic [claude] [nr] [--force-model=sonnet|opus]: carries one epic from start to acceptance by repeating
 # `ralph-once <epic>` (one sub-issue per run, fresh context) — ADR 0013. It decides only from
 # once.sh's exit-code contract (see the header of once.sh); the decision is the pure function
 # ralph_epic_decision in lib.sh.
@@ -8,14 +8,13 @@
 # Without a number it takes the epic the selector would (started first, then lowest number) and
 # honours the `needs-human-test` gate; with a number the gate is skipped, like ralph-once.
 #
-# Test seams: RALPH_ONCE_CMD replaces once.sh (called with: [runtime] <epic>; it may write the
+# Test seams: RALPH_ONCE_CMD replaces once.sh (called with: claude <epic>; it may write the
 # issue number it worked on to $RALPH_ISSUE_FILE).
 SCRIPT_DIR="$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")" && pwd)"
 . "$SCRIPT_DIR/lib.sh"
 
 ralph_parse_args ralph-epic "$@" || exit "$RALPH_EXIT_ERROR"
 ralph_start_run_log "epic${RALPH_ISSUE_ARG:+-$RALPH_ISSUE_ARG}" "$@"
-runtime="$RALPH_RUNTIME"
 epic="$RALPH_ISSUE_ARG"
 once_cmd="${RALPH_ONCE_CMD:-$SCRIPT_DIR/once.sh}"
 
@@ -54,7 +53,7 @@ fi
 
 open_count=$(jq -r --argjson e "$epic" '[.[] | select(.number == $e) | .open[]] | length' <<<"$epics")
 limit=$(ralph_epic_iteration_limit "${open_count:-0}")
-echo "ralph-epic: epic #${epic}, otwartych sub-issues: ${open_count:-0}, limit iteracji: ${limit} (runtime ${runtime}${RALPH_FORCE_MODEL:+, model wymuszony: $RALPH_FORCE_MODEL/high})."
+echo "ralph-epic: epic #${epic}, otwartych sub-issues: ${open_count:-0}, limit iteracji: ${limit} (runtime claude${RALPH_FORCE_MODEL:+, model wymuszony: $RALPH_FORCE_MODEL/high})."
 
 # Open sub-issues of the epic as "  #n: title (HITL) ← #blockers" lines (arrow only when blocked).
 open_list() {
@@ -76,7 +75,7 @@ while :; do
   : > "$issue_file"
   echo
   ralph_say dim "── ralph-epic: iteracja ${runs}/${limit} ──"
-  RALPH_ISSUE_FILE="$issue_file" RALPH_NOTIFY_HITL=1 "$once_cmd" "$runtime" "$epic" \
+  RALPH_ISSUE_FILE="$issue_file" RALPH_NOTIFY_HITL=1 "$once_cmd" claude "$epic" \
     ${RALPH_FORCE_MODEL:+"--force-model=$RALPH_FORCE_MODEL"}
   code=$?
   issue=$(head -1 "$issue_file")

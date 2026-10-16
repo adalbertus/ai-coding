@@ -51,18 +51,21 @@ expect_ok "ralph-once 224 parses as default Claude explicit issue" ralph_parse_a
 expect_eq "default runtime is claude" "$RALPH_RUNTIME" "claude"
 expect_eq "issue parsed" "$RALPH_ISSUE_ARG" "224"
 
-expect_ok "ralph-once codex 224 parses as Codex explicit issue" ralph_parse_args ralph-once codex 224
-expect_eq "codex runtime parsed" "$RALPH_RUNTIME" "codex"
-expect_eq "codex issue parsed" "$RALPH_ISSUE_ARG" "224"
-
-expect_ok "ralph-once codex parses as Codex selector mode" ralph_parse_args ralph-once codex
-expect_eq "codex selector runtime parsed" "$RALPH_RUNTIME" "codex"
-expect_eq "codex selector has no issue" "$RALPH_ISSUE_ARG" ""
+expect_ok "ralph-once claude 224 parses as an explicit issue" ralph_parse_args ralph-once claude 224
+expect_eq "  claude is skipped, issue parsed" "$RALPH_RUNTIME/$RALPH_ISSUE_ARG" "claude/224"
+expect_ok "ralph-once claude parses as selector mode" ralph_parse_args ralph-once claude
+expect_eq "  selector has no issue" "$RALPH_ISSUE_ARG" ""
+expect_fail "ralph-once codex 224 is rejected" ralph_parse_args ralph-once codex 224
+expect_fail "ralph-once codex is rejected" ralph_parse_args ralph-once codex
+expect_fail "ralph-epic codex is rejected" ralph_parse_args ralph-epic codex 12
+expect_fail "ralph-once-local codex is rejected" ralph_parse_args ralph-once-local codex
+expect_eq "  the rejection says Codex no longer runs Ralph" \
+  "$(ralph_parse_args ralph-once codex 2>&1 | grep -c 'Codex nie uruchamia już Ralpha')" "1"
+expect_eq "  usage does not mention codex" \
+  "$(for l in ralph-once ralph-epic ralph-once-local; do ralph_usage $l; done | grep -ci codex)" "0"
 
 expect_fail "unknown runtime/issue is rejected" ralph_parse_args ralph-once gpt 224
 expect_fail "ralph-once-local rejects issue arg" ralph_parse_args ralph-once-local 224
-expect_ok "ralph-once-local accepts codex runtime" ralph_parse_args ralph-once-local codex
-expect_eq "local codex runtime parsed" "$RALPH_RUNTIME" "codex"
 
 expect_ok "--force-model before the issue number" ralph_parse_args ralph-once --force-model=opus 224
 expect_eq "  forced model parsed" "$RALPH_FORCE_MODEL" "opus"
@@ -73,36 +76,16 @@ expect_ok "ralph-once-local accepts --force-model" ralph_parse_args ralph-once-l
 expect_ok "no flag -> no forced model (reset between calls)" ralph_parse_args ralph-once 224
 expect_eq "  forced model empty" "$RALPH_FORCE_MODEL" ""
 expect_fail "--force-model rejects an unknown model" ralph_parse_args ralph-once --force-model=haiku 224
-expect_fail "--force-model rejects the codex runtime" ralph_parse_args ralph-once codex --force-model=opus
 
 expect_eq "Claude contract file" "$(ralph_contract_file claude)" "CLAUDE.md"
-expect_eq "Codex contract file" "$(ralph_contract_file codex)" "AGENTS.md"
-expect_eq "Claude tdd skill syntax" "$(ralph_skill_tdd claude)" "/tdd"
-expect_eq "Codex tdd skill syntax" "$(ralph_skill_tdd codex)" '$tdd'
+expect_eq "Codex contract file (preflight)" "$(ralph_contract_file codex)" "AGENTS.md"
 
 tmp_prompt=$(mktemp)
-printf 'Read {AGENT_CONTRACT_FILE}; use {SKILL_TDD}.\n' > "$tmp_prompt"
-expect_eq "render Claude prompt" "$(ralph_render_prompt claude "$tmp_prompt")" "Read CLAUDE.md; use /tdd."
-expect_eq "render Codex prompt" "$(ralph_render_prompt codex "$tmp_prompt")" 'Read AGENTS.md; use $tdd.'
+printf 'Read CLAUDE.md; use /tdd.\n' > "$tmp_prompt"
+expect_eq "render prompt returns the file as is" "$(ralph_render_prompt "$tmp_prompt")" "Read CLAUDE.md; use /tdd."
 rm -f "$tmp_prompt"
-
-# {EXPLORE_GUIDANCE} is spliced in BEFORE the other placeholders, so the {AGENT_CONTRACT_FILE}
-# markers carried by the guidance prose itself still get resolved.
-tmp_prompt=$(mktemp)
-printf '{EXPLORE_GUIDANCE}\n' > "$tmp_prompt"
-expect_fail "rendered guidance leaves no unresolved placeholder" \
-  grep -q '{[A-Z_]*}' <<<"$(ralph_render_prompt codex "$tmp_prompt")"
-rm -f "$tmp_prompt"
-
-# The two branches must be genuinely different prose, each naming the tools its runtime has.
-expect_ok "Claude exploration names Read/Grep + Explore subagent" \
-  grep -qF 'delegate to the `Explore` subagent' <<<"$(ralph_explore_guidance claude)"
-expect_ok "Codex exploration names concrete shell commands" \
-  grep -qF "sed -n '<start>,<end>p'" <<<"$(ralph_explore_guidance codex)"
-# ADR 0005: a subagent is a cheap linguistic escape hatch whose cost we have only measured on
-# Claude. Until measured on Codex, that branch must not offer it.
-expect_fail "Codex exploration does not mention subagents" \
-  grep -qi 'subagent' <<<"$(ralph_explore_guidance codex)"
+expect_fail "no prompt carries a runtime placeholder" \
+  grep -qE '\{(AGENT_CONTRACT_FILE|SKILL_TDD|EXPLORE_GUIDANCE)\}' "$SCRIPT_DIR"/../prompt*.md
 
 tmp_contract=$(mktemp)
 printf '# Repo\n\n## Ralph\n\nRun `npm test`.\n\n### Done\ngreen\n\n## Inne\nnieistotne\n' > "$tmp_contract"
@@ -120,96 +103,50 @@ expect_eq "mode: no labels -> hitl" "$(ralph_worker_mode </dev/null)" "hitl"
 expect_eq "mode: similar label is not ready-for-agent" \
   "$(printf '%s\n' not-ready-for-agent | ralph_worker_mode)" "hitl"
 
-# Golden files: for the `claude` branch this is a gate — that prose is in daily use and must not
-# drift as a side effect of a Codex change. For `codex` it is a magnifying glass: the prose is
-# being tuned against context measurements, and every version has to be visible in git history.
-# A deliberate change to either means regenerating them: UPDATE_GOLDEN=1 bash ralph/test/lib.test.sh
+# Golden files: the prompts as the worker gets them. A deliberate change means regenerating them:
+# UPDATE_GOLDEN=1 bash ralph/test/lib.test.sh
 GOLDEN_DIR="$SCRIPT_DIR/golden"
 for prompt_file in prompt prompt-hitl prompt-local prompt-review; do
-  for runtime in claude codex; do
-    golden="$GOLDEN_DIR/$prompt_file.$runtime.md"
-    rendered=$(ralph_render_prompt "$runtime" "$SCRIPT_DIR/../$prompt_file.md")
-    if [ -n "${UPDATE_GOLDEN:-}" ]; then
-      printf '%s\n' "$rendered" > "$golden"
-      echo "· zregenerowano $prompt_file.$runtime.md"
-      continue
-    fi
-    if [ ! -f "$golden" ]; then
-      echo "✗ brak golden file $prompt_file.$runtime.md (UPDATE_GOLDEN=1 żeby wygenerować)"
-      fail=$((fail+1))
-      continue
-    fi
-    if diff_out=$(diff -u "$golden" <(printf '%s\n' "$rendered")); then
-      echo "✓ golden render: $prompt_file.$runtime.md"
-      pass=$((pass+1))
-    else
-      echo "✗ golden render: $prompt_file.$runtime.md"
-      printf '%s\n' "$diff_out" | sed 's/^/   /'
-      echo "   Zmiana celowa? UPDATE_GOLDEN=1 bash ralph/test/lib.test.sh"
-      fail=$((fail+1))
-    fi
-  done
+  golden="$GOLDEN_DIR/$prompt_file.md"
+  rendered=$(ralph_render_prompt "$SCRIPT_DIR/../$prompt_file.md")
+  if [ -n "${UPDATE_GOLDEN:-}" ]; then
+    printf '%s\n' "$rendered" > "$golden"
+    echo "· zregenerowano $prompt_file.md"
+    continue
+  fi
+  if [ ! -f "$golden" ]; then
+    echo "✗ brak golden file $prompt_file.md (UPDATE_GOLDEN=1 żeby wygenerować)"
+    fail=$((fail+1))
+    continue
+  fi
+  if diff_out=$(diff -u "$golden" <(printf '%s\n' "$rendered")); then
+    echo "✓ golden render: $prompt_file.md"
+    pass=$((pass+1))
+  else
+    echo "✗ golden render: $prompt_file.md"
+    printf '%s\n' "$diff_out" | sed 's/^/   /'
+    echo "   Zmiana celowa? UPDATE_GOLDEN=1 bash ralph/test/lib.test.sh"
+    fail=$((fail+1))
+  fi
 done
 
-ralph_model_for_complexity claude heavy
+ralph_model_for_complexity heavy
 expect_eq "Claude heavy: the normal-tier model at high effort (ADR 0016)" "$RALPH_MODEL/$RALPH_EFFORT" "sonnet/high"
 
-RALPH_CODEX_MODEL_NORMAL="gpt-normal" RALPH_CODEX_MODEL_HEAVY="gpt-heavy" ralph_model_for_complexity codex heavy
-expect_eq "Codex heavy: implemented by the normal model, high reasoning" "$RALPH_MODEL/$RALPH_EFFORT" "gpt-normal/high"
-
-ralph_review_model claude
+ralph_review_model
 expect_eq "Claude przegląd heavy model" "$RALPH_REVIEW_MODEL/$RALPH_REVIEW_EFFORT" "opus/high"
-RALPH_CODEX_MODEL_HEAVY="gpt-heavy" ralph_review_model codex
-expect_eq "Codex przegląd heavy uses the heavy model" "$RALPH_REVIEW_MODEL/$RALPH_REVIEW_EFFORT" "gpt-heavy/high"
-RALPH_FORCE_MODEL=sonnet ralph_review_model claude
+RALPH_FORCE_MODEL=sonnet ralph_review_model
 expect_eq "--force-model does not touch the przegląd model" "$RALPH_REVIEW_MODEL" "opus"
 RALPH_FORCE_MODEL=""
 
-ralph_model_for_complexity claude trivial
+ralph_model_for_complexity trivial
 expect_eq "Claude trivial stays on a model with auto mode (not Haiku)" "$RALPH_MODEL/$RALPH_EFFORT" "sonnet/low"
 
-ralph_model_for_complexity codex trivial
-expect_eq "Codex trivial uses config model + low reasoning" "$RALPH_MODEL/$RALPH_EFFORT" "/low"
-
-RALPH_CODEX_MODEL_NORMAL="gpt-test" ralph_model_for_complexity codex normal
-expect_eq "Codex normal env model override" "$RALPH_MODEL/$RALPH_EFFORT" "gpt-test/medium"
-unset RALPH_CODEX_MODEL_NORMAL
-
-RALPH_FORCE_MODEL=sonnet ralph_model_for_complexity claude heavy
+RALPH_FORCE_MODEL=sonnet ralph_model_for_complexity heavy
 expect_eq "--force-model=sonnet overrides heavy, at high effort" "$RALPH_MODEL/$RALPH_EFFORT" "sonnet/high"
-RALPH_FORCE_MODEL=opus ralph_model_for_complexity claude trivial
+RALPH_FORCE_MODEL=opus ralph_model_for_complexity trivial
 expect_eq "--force-model=opus overrides trivial, at high effort" "$RALPH_MODEL/$RALPH_EFFORT" "opus/high"
 RALPH_FORCE_MODEL=""
-
-fake_codex_dir=$(mktemp -d)
-mkdir "$fake_codex_dir/bin"
-cat > "$fake_codex_dir/bin/codex" <<'FAKE_CODEX'
-#!/usr/bin/env bash
-printf '%s\n' "$@" > "$CODEX_ARGV_CAPTURE"
-FAKE_CODEX
-chmod +x "$fake_codex_dir/bin/codex"
-
-(
-  PATH="$fake_codex_dir/bin:$PATH"
-  CODEX_ARGV_CAPTURE="$fake_codex_dir/guard.argv"
-  export CODEX_ARGV_CAPTURE
-  ralph_run_model_capture codex guard "PROMPT" >/dev/null
-)
-expect_eq "Codex guard passes approval policy before exec" \
-  "$(cat "$fake_codex_dir/guard.argv")" \
-  $'-a\nnever\nexec\n--ephemeral\n-s\nread-only\n-C\n'"$PWD"$'\nPROMPT'
-
-(
-  PATH="$fake_codex_dir/bin:$PATH"
-  CODEX_ARGV_CAPTURE="$fake_codex_dir/worker.argv"
-  export CODEX_ARGV_CAPTURE
-  ralph_run_worker codex gpt-test low "PROMPT" issue-16 hitl >/dev/null
-)
-expect_eq "Codex HITL worker starts interactive CLI with auto-review" \
-  "$(cat "$fake_codex_dir/worker.argv")" \
-  $'--no-alt-screen\n--approve-for-me\n-C\n'"$PWD"$'\n-m\ngpt-test\n-c\nmodel_reasoning_effort="low"\nPROMPT'
-
-rm -rf "$fake_codex_dir"
 
 fake_hc_dir=$(mktemp -d)
 mkdir "$fake_hc_dir/bin"
@@ -222,7 +159,7 @@ chmod +x "$fake_hc_dir/bin/claude"
   PATH="$fake_hc_dir/bin:$PATH"
   CLAUDE_ARGV_CAPTURE="$fake_hc_dir/worker.argv"
   export CLAUDE_ARGV_CAPTURE
-  ralph_run_worker claude sonnet low "PROMPT" issue-13 hitl >/dev/null
+  ralph_run_worker sonnet low "PROMPT" issue-13 hitl >/dev/null
 )
 expect_eq "Claude HITL worker starts interactive session (no -p) in auto mode" \
   "$(cat "$fake_hc_dir/worker.argv")" \
@@ -353,7 +290,7 @@ worker_out=$(
   CLAUDE_ARGV_CAPTURE="$fake_claude_dir/worker.argv"
   CLAUDE_STREAM_FIXTURE="$fake_claude_dir/stream.jsonl"
   export CLAUDE_ARGV_CAPTURE CLAUDE_STREAM_FIXTURE
-  ralph_run_worker claude sonnet low "PROMPT" issue-12
+  ralph_run_worker sonnet low "PROMPT" issue-12
   echo "status:[$(git status --porcelain)]"
   echo "logs:$(ls "$(git rev-parse --git-path ralph-logs)")"
 )
@@ -369,70 +306,13 @@ expect_eq "Claude worker log is written under ralph-logs, git status stays clean
   $'status:[]\nlogs:STAMP-issue-12.jsonl'
 rm -rf "$fake_claude_dir" "$claude_repo"
 
-# --- Codex worker: exec stream renderer + unattended adapter ---
-codex_fixture=$(cat <<STREAM
-{"type":"thread.started","thread_id":"thread-abc"}
-{"type":"turn.started"}
-{"type":"item.completed","item":{"id":"i0","type":"agent_message","text":"Zaczynam."}}
-{"type":"item.started","item":{"id":"i1","type":"command_execution","command":"bash test.sh","status":"in_progress"}}
-{"type":"item.completed","item":{"id":"i1","type":"command_execution","command":"bash test.sh\\necho second","aggregated_output":"ok","exit_code":0,"status":"completed"}}
-{"type":"item.completed","item":{"id":"i2","type":"command_execution","command":"false","aggregated_output":"","exit_code":1,"status":"failed"}}
-{"type":"item.completed","item":{"id":"i3","type":"file_change","changes":[{"path":"$PWD/greet.sh","kind":"update"},{"path":"/elsewhere/x.md","kind":"add"}],"status":"completed"}}
-{"type":"item.completed","item":{"id":"i4","type":"reasoning","text":"hmm"}}
-{"type":"item.completed","item":{"id":"i5","type":"future_thing","foo":1}}
-not json at all
-{"type":"item.completed","item":{"id":"i6","type":"agent_message","text":"Gotowe: issue zamknięte."}}
-{"type":"turn.completed","usage":{"input_tokens":1}}
-STREAM
-)
-expect_eq "codex renderer: narration, command, failed command, file changes, final message; unknown/garbage skipped" \
-  "$(ralph_render_codex_stream <<<"$codex_fixture")" \
-  $'› Zaczynam.\n  ▸ Bash: bash test.sh\n  ✗ Bash (exit 1): false\n  ▸ Edit: greet.sh\n  ▸ Write: /elsewhere/x.md\n\n── Raport workera ──\nGotowe: issue zamknięte.'
-expect_eq "codex renderer: unknown-only stream renders nothing" \
-  "$(ralph_render_codex_stream <<<'{"type":"thread.started","thread_id":"t"}')" ""
-
-fake_cx_dir=$(mktemp -d)
-mkdir "$fake_cx_dir/bin"
-cat > "$fake_cx_dir/bin/codex" <<'FAKE_CODEX'
-#!/usr/bin/env bash
-printf '%s\n' "$@" > "$CODEX_ARGV_CAPTURE"
-cat "$CODEX_STREAM_FIXTURE"
-FAKE_CODEX
-chmod +x "$fake_cx_dir/bin/codex"
-printf '%s\n' "$codex_fixture" > "$fake_cx_dir/stream.jsonl"
-
-cx_repo=$(mktemp -d)
-cx_out=$(
-  cd "$cx_repo" || exit 1
-  git init -q
-  PATH="$fake_cx_dir/bin:$PATH"
-  CODEX_ARGV_CAPTURE="$fake_cx_dir/worker.argv"
-  CODEX_STREAM_FIXTURE="$fake_cx_dir/stream.jsonl"
-  export CODEX_ARGV_CAPTURE CODEX_STREAM_FIXTURE
-  ralph_run_worker codex gpt-test low "PROMPT" issue-16
-  echo "status:[$(git status --porcelain)]"
-  echo "logs:$(ls "$(git rev-parse --git-path ralph-logs)")"
-)
-expect_eq "Codex AFK worker runs unattended: exec --json --approve-for-me" \
-  "$(cat "$fake_cx_dir/worker.argv")" \
-  $'exec\n--json\n--approve-for-me\n-C\n'"$cx_repo"$'\n-m\ngpt-test\n-c\nmodel_reasoning_effort="low"\nPROMPT'
-case "$cx_out" in *"codex resume thread-abc"*) r=yes ;; *) r=no ;; esac
-expect_eq "Codex AFK worker prints resume line with the thread id" "$r" "yes"
-case "$cx_out" in *"▸ Bash: bash test.sh"*) r=yes ;; *) r=no ;; esac
-expect_eq "Codex AFK worker shows progress lines on screen" "$r" "yes"
-expect_eq "Codex AFK worker log is under ralph-logs, git status stays clean" \
-  "$(grep -E '^(status|logs):' <<<"$cx_out" | sed -E 's/[0-9]{8}-[0-9]{6}/STAMP/')" \
-  $'status:[]\nlogs:STAMP-issue-16.jsonl'
-rm -rf "$fake_cx_dir" "$cx_repo"
-
 lock_repo=$(mktemp -d)
 (
   cd "$lock_repo" || exit 1
   git init -q
-  RALPH_RUNTIME=codex
   ralph_acquire_lock 224
   [ -d "$(git rev-parse --git-path ralph.lock.d)" ] || exit 1
-  grep -q '^runtime=codex$' "$(git rev-parse --git-path ralph.lock.d)/meta" || exit 1
+  grep -q '^runtime=claude$' "$(git rev-parse --git-path ralph.lock.d)/meta" || exit 1
   grep -q '^issue=224$' "$(git rev-parse --git-path ralph.lock.d)/meta" || exit 1
   ralph_release_lock
   [ ! -e "$(git rev-parse --git-path ralph.lock.d)" ] || exit 1
@@ -469,7 +349,6 @@ stale_repo=$(mktemp -d)
   stale_lock="$(git rev-parse --git-path ralph.lock.d)"
   mkdir "$stale_lock"
   printf 'pid=999999\nruntime=claude\nissue=235\n' > "$stale_lock/meta"
-  RALPH_RUNTIME=codex
   output=$(ralph_acquire_lock 236 2>&1 </dev/null)
   printf '%s\n' "$output" | grep -q 'Stary lock bez żywego PID; usuwam i kontynuuję.' || exit 1
   [ -d "$stale_lock" ] || exit 1
@@ -822,20 +701,11 @@ not json
 {"type":"result","is_error":false,"num_turns":1,"result":"REVIEW: OK\n- case: test_a","total_cost_usd":0.4567}
 {"type":"result","is_error":true,"num_turns":1,"result":"limit","total_cost_usd":0.4567}
 JSONL
-expect_eq "last report (Claude): last non-error result" "$(ralph_last_report claude "$review_log")" "REVIEW: OK
+expect_eq "last report (Claude): last non-error result" "$(ralph_last_report "$review_log")" "REVIEW: OK
 - case: test_a"
-expect_eq "run cost (Claude): max total_cost_usd, rounded" "$(ralph_run_cost claude "$review_log")" '$0.46'
+expect_eq "run cost (Claude): max total_cost_usd, rounded" "$(ralph_run_cost "$review_log")" '$0.46'
 printf '%s\n' '{"type":"result","result":"x"}' > "$review_log"
-expect_eq "run cost (Claude): no cost data -> empty" "$(ralph_run_cost claude "$review_log")" ""
-cat > "$review_log" <<'JSONL'
-{"type":"item.completed","item":{"type":"agent_message","text":"working"}}
-{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":40,"output_tokens":7}}
-{"type":"item.completed","item":{"type":"agent_message","text":"REVIEW: FAIL\n- gap"}}
-{"type":"turn.completed","usage":{"input_tokens":50,"cached_input_tokens":10,"output_tokens":3}}
-JSONL
-expect_eq "last report (Codex): last agent message" "$(ralph_last_report codex "$review_log")" "REVIEW: FAIL
-- gap"
-expect_eq "run cost (Codex): summed tokens" "$(ralph_run_cost codex "$review_log")" "tokeny: wejście 150 (w tym cache 50), wyjście 10"
+expect_eq "run cost (Claude): no cost data -> empty" "$(ralph_run_cost "$review_log")" ""
 rm -f "$review_log"
 
 # ralph_heavy_review end to end, with the worker and gh stubbed in this shell: what it does on
@@ -857,7 +727,7 @@ review_case() {
         echo "$1 $2 $3" >> "$gh_calls"; printf '%s\n' "$*" >> "$gh_calls.full"
       fi
     }
-    ralph_heavy_review claude 12 abc123 "## Issue #12: t" >/dev/null
+    ralph_heavy_review 12 abc123 "## Issue #12: t" >/dev/null
     printf '%s|' "${RALPH_REVIEW_EXIT:-none}"
     tr '\n' ';' < "$gh_calls"
     grep -q -F "$RALPH_REVIEW_FAIL_MARKER" "$gh_calls.full" && printf 'marker'
@@ -949,7 +819,7 @@ limit_case() {
 past=$((now - 100)); far=$((now + 30000))
 expect_eq "worker hits a limit with the reset passed -> resumes the session, run ends, ślad gone" \
   "$(limit_case "limit_stream $past > \$FAKE_Q/1.jsonl; printf '%s\n' \"\$DONE_STREAM\" > \$FAKE_Q/2.jsonl" \
-     ralph_run_worker_through_limit claude sonnet high PROMPT issue-12 afk worker)" "none|2|brak"
+     ralph_run_worker_through_limit sonnet high PROMPT issue-12 afk worker)" "none|2|brak"
 expect_eq "  the second call resumes that session with the follow-up message, same model" \
   "$(head -10 "$fake_lim/q/argv.2" | tr '\n' ' ')" "-p --resume $SID --permission-mode auto --output-format stream-json --verbose --model sonnet "
 expect_eq "  and is told to continue" "$(tail -1 "$fake_lim/q/argv.2")" "$RALPH_RESUME_PROMPT"
@@ -957,30 +827,30 @@ expect_eq "  the first call is a fresh run" "$(grep -c -- '--resume' "$fake_lim/
 
 expect_eq "worker hits a limit too far away -> stops, ślad left with the caller's context" \
   "$(limit_case "limit_stream $far > \$FAKE_Q/1.jsonl; RALPH_LIMIT_CONTEXT=\$'issue=12\npre_head=abc\ncomplexity=heavy'" \
-     ralph_run_worker_through_limit claude sonnet high PROMPT issue-12 afk worker)" \
+     ralph_run_worker_through_limit sonnet high PROMPT issue-12 afk worker)" \
   "limit|1|runtime,phase,session,model,effort,label,resets_at,limit,branch,issue,pre_head,complexity,"
 expect_eq "  the stop message says what to do" "$(grep -c 'uruchom ten sam przebieg ponownie' "$fake_lim/out")" "1"
 
 trace_setup="ralph_limit_trace_write runtime=claude phase=worker session=$SID model=sonnet effort=high label=issue-12 resets_at=$past limit=five_hour branch=epic/45 issue=12"
 expect_eq "restart from the ślad -> resumes right away, run ends, ślad gone" \
   "$(limit_case "$trace_setup; printf '%s\n' \"\$DONE_STREAM\" > \$FAKE_Q/1.jsonl" \
-     ralph_run_worker_through_limit claude sonnet high "" issue-12 afk worker "$SID")" "none|1|brak"
+     ralph_run_worker_through_limit sonnet high "" issue-12 afk worker "$SID")" "none|1|brak"
 expect_eq "  with --resume" "$(sed -n 2,3p "$fake_lim/q/argv.1" | tr '\n' ' ')" "--resume $SID "
 expect_eq "restart, but the runtime does not take the session up -> stop, ślad stays" \
   "$(limit_case "$trace_setup; echo 1 > \$FAKE_Q/1.rc" \
-     ralph_run_worker_through_limit claude sonnet high "" issue-12 afk worker "$SID")" \
+     ralph_run_worker_through_limit sonnet high "" issue-12 afk worker "$SID")" \
   "resume-failed|1|runtime,phase,session,model,effort,label,resets_at,limit,branch,issue,"
 expect_eq "restart before a far reset -> no call, stop, ślad stays" \
   "$(limit_case "${trace_setup/resets_at=$past/resets_at=$far}" \
-     ralph_run_worker_through_limit claude sonnet high "" issue-12 afk worker "$SID")" \
+     ralph_run_worker_through_limit sonnet high "" issue-12 afk worker "$SID")" \
   "limit|0|runtime,phase,session,model,effort,label,resets_at,limit,branch,issue,"
 expect_eq "a limit that never lifts -> gives up after $RALPH_LIMIT_MAX_WAITS waits" \
   "$(limit_case "for i in 1 2 3 4 5; do limit_stream $past > \$FAKE_Q/\$i.jsonl; done" \
-     ralph_run_worker_through_limit claude sonnet high PROMPT issue-12 afk worker)" \
+     ralph_run_worker_through_limit sonnet high PROMPT issue-12 afk worker)" \
   "limit|4|runtime,phase,session,model,effort,label,resets_at,limit,branch,"
 expect_eq "a normal run leaves another run's ślad alone" \
   "$(limit_case "$trace_setup; printf '%s\n' \"\$DONE_STREAM\" > \$FAKE_Q/1.jsonl" \
-     ralph_run_worker_through_limit claude sonnet high PROMPT issue-13 afk worker)" \
+     ralph_run_worker_through_limit sonnet high PROMPT issue-13 afk worker)" \
   "none|1|runtime,phase,session,model,effort,label,resets_at,limit,branch,issue,"
 
 # Which ślad applies: fake gh answers issue 12's state/labels and its parent (45).
@@ -992,13 +862,20 @@ applies_case() {
       *'--json labels'*) echo $labels ;;
       *'/parent'*) echo 45 ;;
     esac; }
-    ralph_limit_trace_applies claude '$arg' && RALPH_LIMIT_STOP=applies" true
+    ralph_limit_trace_applies '$arg' && RALPH_LIMIT_STOP=applies" true
 }
 expect_eq "ślad applies: issue open + AFK, same branch, epic as the argument" "$(applies_case open true 45)" "applies|0|runtime,phase,session,model,effort,label,resets_at,limit,branch,issue,"
 expect_eq "ślad applies: the issue itself as the argument" "$(applies_case open true 12 | cut -d'|' -f1)" "applies"
 expect_eq "ślad applies: no argument" "$(applies_case open true '' | cut -d'|' -f1)" "applies"
 expect_eq "ślad of another issue: not applied, left alone" "$(applies_case open true 77)" "none|0|runtime,phase,session,model,effort,label,resets_at,limit,branch,issue,"
 expect_eq "  says so in one line" "$(grep -c 'dotyczy issue #12, nie #77 — zostawiam' "$fake_lim/out")" "1"
+codex_trace_case() {
+  limit_case "${trace_setup/runtime=claude/runtime=codex}
+    gh() { echo open; }
+    ralph_limit_trace_applies '' && RALPH_LIMIT_STOP=applies" true
+}
+expect_eq "ślad of the retired codex runtime: not applied, removed" "$(codex_trace_case)" "none|0|brak"
+expect_eq "  with one line on screen" "$(grep -c 'Usuwam ślad limitu użycia (issue #12) z runtime' "$fake_lim/out")" "1"
 expect_eq "stale ślad (issue closed meanwhile): not applied, removed" "$(applies_case closed false 45)" "none|0|brak"
 expect_eq "  with the reason" "$(grep -c 'Usuwam nieaktualny ślad limitu użycia (issue #12): issue jest już zamknięte' "$fake_lim/out")" "1"
 expect_eq "stale ślad (another branch): not applied, removed" "$(applies_case open true 45 dev)" "none|0|brak"
@@ -1006,7 +883,7 @@ expect_eq "GitHub does not answer: not applied, left alone" "$(applies_case '' '
 
 # Strażnik / selektor: one-shot calls wait and repeat; the answer is the result text.
 capture_case() {
-  limit_case "$1; out=\$(ralph_run_model_capture claude guard PROMPT 2>/dev/null); rc=\$?; echo \"\$out/\$rc\" > \$FAKE_Q/answer" true
+  limit_case "$1; out=\$(ralph_run_model_capture guard PROMPT 2>/dev/null); rc=\$?; echo \"\$out/\$rc\" > \$FAKE_Q/answer" true
   printf '|%s' "$(cat "$fake_lim/q/answer")"
 }
 ANSWER_STREAM='{"type":"system","subtype":"init","session_id":"s"}

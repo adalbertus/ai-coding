@@ -53,7 +53,7 @@ codex plugin add ai-coding --marketplace ai-coding-local
 ### Etap 2 — raz na każde repo, w którym chcesz Ralpha
 
 Repo bez Ralpha potrzebuje tylko sekcji `## Ralph` w swoim `CLAUDE.md` i `AGENTS.md` — inaczej
-strażnik jest fail-closed i `ralph-once <runtime>` od razu halt-uje. Sekcję pisze
+strażnik jest fail-closed i `ralph-once` od razu halt-uje. Sekcję pisze
 `/ralph-konfiguracja` albo `$ralph-konfiguracja`:
 
 ```bash
@@ -61,7 +61,6 @@ cd ~/projects/repo-laravel            # repo nr 1 — stack PHP/Laravel, jeszcze
 # w sesji Claude albo Codex: /ralph-konfiguracja lub $ralph-konfiguracja
 #   → wykrywa stack (composer test / pint), pisze ## Ralph do CLAUDE.md i AGENTS.md, tworzy labelki
 ralph-once                            # pętla rusza, bo ## Ralph już jest
-ralph-once codex                      # ta sama pętla przez Codex
 
 cd ~/projects/repo-expo               # repo nr 2 — stack RN/Expo, jeszcze bez Ralpha
 # w sesji Claude albo Codex: /ralph-konfiguracja lub $ralph-konfiguracja
@@ -172,34 +171,33 @@ znikają przy przesiadce na inną maszynę.
 ## Współdzielony Ralph
 
 Pętla bierze **jedno** zadanie, implementuje je, uruchamia feedback loops i commituje — AFK
-(away-from-keyboard), z terminala. Runtime wybierasz argumentem:
+(away-from-keyboard), z terminala. Ralph uruchamia wyłącznie Claude (ADR 0020); argument
+`claude` można pominąć, a `codex` kończy przebieg komunikatem i niezerowym kodem:
 
 ```bash
-ralph-once 224          # domyślnie Claude, wstecznie kompatybilne
-ralph-once claude 224   # jawnie Claude
-ralph-once codex 224    # jawnie Codex
+ralph-once 224          # Claude jest domyślny
+ralph-once claude 224   # to samo, jawnie
 ralph-once 12           # 12 to epic ([PRD]) → pierwsze wolne z jego otwartych sub-issues
-ralph-once              # selektor + worker przez Claude
-ralph-once codex        # selektor + worker przez Codex
-ralph-once-local codex  # lokalne issues/*.md przez Codex
+ralph-once              # selektor + worker
+ralph-once-local        # lokalne issues/*.md
 ralph-once 224 --force-model=opus  # Opus z effort high zamiast modelu z complexity:*
 ```
 
 Dwa flavoury, jeden zestaw promptów:
 
-- **`ralph-once`** — zadania w GitHub Issues (label `ready-for-agent`). Selektor wybranego
-  runtime'u wybiera następne issue, a model worker'a zależy od labelki `complexity:*`.
+- **`ralph-once`** — zadania w GitHub Issues (label `ready-for-agent`). Selektor (Haiku)
+  wybiera następne issue, a model worker'a zależy od labelki `complexity:*`.
 - **`ralph-once-local`** — zadania w plikach `issues/*.md`, bez selektora GitHub.
 
-**`--force-model=sonnet|opus`** (wszystkie trzy komendy, tylko Claude) pomija etykietę
+**`--force-model=sonnet|opus`** (wszystkie trzy komendy) pomija etykietę
 `complexity:*`: każde issue jedzie na wskazanym modelu z effort high, także sesja HITL. Flaga może
-stać w dowolnym miejscu. Strażnik i selektor zostają na Haiku. Z Codeksem run odmawia startu.
+stać w dowolnym miejscu. Strażnik i selektor zostają na Haiku.
 
 **`complexity:heavy`** nie oznacza już silniejszego implementera (ADR 0016). Issue implementuje
 model `normal` z effort high (Claude: Sonnet). Wyrocznią jest sekcja `## Przypadki do
 przetestowania`, którą `to-issues-ralph` pisze przy rozbiciu: worker pisze jeden test na każdy
 przypadek. Gdy przebieg AFK zamknie takie issue, `ralph-once` uruchamia **przegląd heavy**:
-silniejszy model (Claude: Opus, Codex: `RALPH_CODEX_MODEL_HEAVY`) czyta diff, może uruchamiać
+silniejszy model (Opus) czyta diff, może uruchamiać
 testy, nie zmienia kodu i nie dotyka GitHuba. Ocenia tylko, czy testy łapią błędną
 implementację przypadków z listy i czy diff nie otwiera przypadku spoza niej. Werdykt:
 - `REVIEW: OK` — issue zostaje zamknięte;
@@ -209,7 +207,7 @@ implementację przypadków z listy i czy diff nie otwiera przypadku spoza niej. 
 - brak werdyktu — issue wraca otwarte, run kończy się błędem.
 
 Przegląd zależy tylko od etykiety: działa też z `--force-model`, nie działa po sesji HITL. Po
-workerze i po przeglądzie run wypisuje koszt (`Koszt workera: $…`; Codex: tokeny).
+workerze i po przeglądzie run wypisuje koszt (`Koszt workera: $…`).
 
 Przed wyborem zadania i workerem oba przechodzą przez **strażnika** (`ralph/preflight.sh`,
 fail-closed; w `ralph-once` po locku i bramce `needs-human-test`): repo musi mieć gotową sekcję
@@ -221,19 +219,16 @@ z diffem i kieruje do `/ralph-konfiguracja`.
 
 Claude jedzie **bez nadzoru**: `claude -p` w **auto mode** (`--permission-mode auto`) ze
 strumieniowym wyjściem JSON. Worker kończy się sam po domknięciu issue.
-Codex też jedzie **bez nadzoru**: `codex exec --json --approve-for-me` (eskalacje sandboxa idą
-przez automatyczny review; flaga jest w `codex exec` od wersji 0.159). W obu runtime'ach
-celem jest AFK bez `dangerously-bypass-*`.
+Celem jest AFK bez `dangerously-bypass-*`.
 
-**Co widać na ekranie.** Strumień z workera przechodzi przez renderer (`lib.sh`), taki sam dla
-obu runtime'ów:
+**Co widać na ekranie.** Strumień z workera przechodzi przez renderer (`lib.sh`):
 
 - `› …` — **narracja**: tekst, który model pisze między krokami („Czytam routing…”, „Bramka
   zielona, commituję”). To główna treść ekranu.
 - `  ▸ Bash: …`, `  ▸ Edit: …` — kroki, przyciemnione, jedna linia ucięta do szerokości
   terminala (`…`). Pełna komenda jest w zapisie runu.
-- `  ✗ …` (czerwone) — krok odrzucony przez CLI (np. zablokowany `sleep`, brak narzędzia) albo
-  komenda Codexa z niezerowym kodem. Komenda Claude zakończona błędem często nie jest widoczna
+- `  ✗ …` (czerwone) — krok odrzucony przez CLI (np. zablokowany `sleep`, brak narzędzia).
+  Komenda zakończona błędem często nie jest widoczna
   jako błąd, bo model dokleja `| tail` i kod wyjścia jest z `tail` — o wyniku bramki mówi narracja
   i werdykt iteracji.
 - Praca w tle (tylko Claude): `⧗` komenda przeniesiona w tle (przekroczony limit czasu Basha)
@@ -256,8 +251,7 @@ wyłącza, a w przekierowaniu do pliku ich nie ma.
 
 **Sesja HITL.** Tryb workera wynika z issue, nie z komendy. Issue z labelką `ready-for-agent`
 idzie bez nadzoru (jak wyżej); issue bez niej to HITL i `ralph-once <nr>` otwiera dla niego
-sesję **interaktywną** (`claude --permission-mode auto` albo `codex --no-alt-screen
---approve-for-me`) z osobnym promptem `ralph/prompt-hitl.md`. Worker zaczyna od tego, jaka decyzja
+sesję **interaktywną** (`claude --permission-mode auto`) z osobnym promptem `ralph/prompt-hitl.md`. Worker zaczyna od tego, jaka decyzja
 lub czynność jest potrzebna od Ciebie, z rekomendacją; po Twojej odpowiedzi implementuje i domyka
 issue tymi samymi regułami co przebieg AFK (w tym odchylenia w epicu). `ralph-once` bez numeru
 nadal bierze wyłącznie AFK.
@@ -268,7 +262,7 @@ dokładnie trzeba (z rekomendacją), i kończy run. Issue nie wraca do pętli sa
 rozstrzygnięta, oddajesz je pętli, przywracając labelkę
 (`gh issue edit <nr> --add-label ready-for-agent`).
 
-**Logi (Claude i Codex).** Wszystko ląduje w `.git/ralph-logs/`. Katalog powstaje przy
+**Logi.** Wszystko ląduje w `.git/ralph-logs/`. Katalog powstaje przy
 pierwszym runie i leży poza drzewem roboczym, więc nie zmienia `git status`. Dwa rodzaje plików:
 
 - **Log przebiegu** — `<data>-<godzina>-epic[-<nr>].log` (`ralph-epic`), `…-once[-<nr>].log`
@@ -282,16 +276,15 @@ pierwszym runie i leży poza drzewem roboczym, więc nie zmienia `git status`. D
 
 Gdy coś się popsuło, w innej sesji wystarczy „zobacz logi w `.git/ralph-logs/`”: log przebiegu
 mówi, co zdecydował skrypt i na czym stanął, zapis runu — co dokładnie robił worker. Na końcu
-runu skrypt wypisuje też `claude --resume <id>` (Codex: `codex resume <id>`) — tą komendą wchodzisz
-do sesji workera, żeby zobaczyć, co zrobił, albo go dopytać. Codex pisze błędy narzędzi tylko na stderr, więc obok JSONL leży
-`…-issue-<nr>.stderr.log`, a gdy są w nim linie `ERROR`, skrypt wypisuje ścieżkę i pierwsze z nich. Ostrzeżenie o brudnym drzewie po runie działa jak wcześniej.
+runu skrypt wypisuje też `claude --resume <id>` — tą komendą wchodzisz
+do sesji workera, żeby zobaczyć, co zrobił, albo go dopytać. Ostrzeżenie o brudnym drzewie po runie działa jak wcześniej.
 
 ### Lock worktree
 
 Ralph zakłada lock per worktree, nie per issue. Jeśli lock istnieje i PID żyje, interaktywny run
 pyta, czy przerwać, czy zakończyć tamten proces; non-interactive zawsze przerywa. Jeśli PID nie
 żyje, interaktywny run pyta o usunięcie stale locka, a non-interactive usuwa go i kontynuuje.
-Równoległe Claude+Codex rób przez osobne worktree/branche.
+Równoległe przebiegi rób przez osobne worktree/branche.
 
 ### Kontrakt `## Ralph` (w `CLAUDE.md` / `AGENTS.md` repo)
 
@@ -389,13 +382,13 @@ w trakcie czekania (laptop wyłączony), rano uruchamiasz to samo co wieczorem (
 `ralph-once 52` albo `ralph-once`): ślad jest ważny, gdy issue jest w stanie z chwili przerwania
 (worker: otwarte z `ready-for-agent`; przegląd: zamknięte) i bieżąca gałąź jest ta sama. Wtedy
 brudne drzewo nie blokuje, a Ralph wznawia sesję przed bramkami i strażnikiem. Nieważny ślad
-znika z jedną linią na ekranie; ślad innego issue lub runtime'u zostaje nietknięty. Gdy runtime
+znika z jedną linią na ekranie; ślad innego issue zostaje nietknięty, a ślad po wycofanym Codeksie jest usuwany. Gdy runtime
 nie podejmie sesji, run kończy się błędem z komunikatem, a ślad zostaje (usuń go, żeby wrócić do
-zwykłych reguł). Na Codeksie limit jest porażką jak dotąd.
+zwykłych reguł).
 
 #### `ralph-epic` — epic od startu do odbioru
 
-`ralph-epic [claude|codex] [nr]` powtarza `ralph-once <epic>` (jedno sub-issue na run, świeży kontekst,
+`ralph-epic [claude] [nr]` powtarza `ralph-once <epic>` (jedno sub-issue na run, świeży kontekst,
 model z `complexity` albo z `--force-model`, które przekazuje każdemu runowi), aż epic trafi do odbioru albo pętla musi stanąć. Decyduje wyłącznie na
 podstawie kodów wyjścia `ralph-once` (czysta funkcja `ralph_epic_decision` w `lib.sh`), nie
 własnego zgadywania.

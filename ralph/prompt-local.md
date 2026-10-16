@@ -13,11 +13,11 @@ what work has been done.
 
 If all AFK tasks are complete, output <promise>NO MORE TASKS</promise>.
 
-# REPO CONTRACT (## Ralph in {AGENT_CONTRACT_FILE})
+# REPO CONTRACT (## Ralph in CLAUDE.md)
 
 This loop is stack-agnostic. Everything specific to THIS repo — the feedback-loop commands
 to run, what "done" means (done-criteria), and any commit conventions — lives in the
-`## Ralph` section of this repo's {AGENT_CONTRACT_FILE}. Read it now and follow it. A preflight guard has
+`## Ralph` section of this repo's CLAUDE.md. Read it now and follow it. A preflight guard has
 already confirmed the section exists and is usable, so it is safe to rely on.
 
 # TASK SELECTION
@@ -35,22 +35,38 @@ Pick the next task. Prioritize tasks in this order:
 
 # EXPLORATION
 
-{EXPLORE_GUIDANCE}
+Explore the repo. Note its structure and conventions (CLAUDE.md), and the existing tests that
+the `## Ralph` feedback loops run.
+
+**Search before you read.** A full `Read` of a large reference file (a glossary, a big module)
+can cost tens of thousands of tokens, and every one of them stays in context for the rest of the
+run — degrading your own reasoning exactly when the implementation needs it. So:
+
+- **If you can name what you are looking for** — a term, a symbol, a function, a path — use
+  `Grep`/`Glob`, then `Read` only the matching range (`offset`/`limit`). This is the default, and
+  it is not a compromise: it returns the exact source text, just less of it.
+- **Only if you cannot formulate a search pattern**, because you need an overview rather than a
+  specific fact, delegate to the `Explore` subagent. It reads in its own context and returns
+  conclusions. It costs a full extra model run and gives you a paraphrase instead of the source,
+  so it earns its keep for open-ended reconnaissance and nothing else.
+
+This is how to read an instruction like "read `CONTEXT.md` before introducing a new term" in a
+repo's CLAUDE.md: **consult** that file for what you need. Do not pull all of it into context.
 
 # IMPLEMENTATION
 
-Use {SKILL_TDD} to complete the task. Keep risky logic (parsing, the data layer, business rules,
+Use /tdd to complete the task. Keep risky logic (parsing, the data layer, business rules,
 date math) in isolated, unit-testable modules, following this repo's conventions. Some work
 cannot be proven by the automated gate (e.g. UI, or device/native behaviour); for that, write
 the thin layer over the tested modules and rely on human verification — the `## Ralph`
 done-criteria say when that applies (see THE ISSUE).
 
-Where {SKILL_TDD} asks you to confirm seams with the user, nobody is there to answer: derive the
+Where /tdd asks you to confirm seams with the user, nobody is there to answer: derive the
 seams from the issue's acceptance criteria, note them in the issue file, and proceed.
 
 # FEEDBACK LOOPS
 
-Before committing, run the feedback loops declared in the `## Ralph` section of {AGENT_CONTRACT_FILE} and
+Before committing, run the feedback loops declared in the `## Ralph` section of CLAUDE.md and
 make them all green. Do not invent commands — use exactly the ones declared there.
 A loop that failed to start is not green. If all that is missing is the repo's declared
 dependencies, install them with its own package manager and lockfile; otherwise treat the issue

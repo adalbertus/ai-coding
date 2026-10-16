@@ -87,7 +87,8 @@ expect_eq "  runtime and epic passed to once" "$(head -1 "$FAKE/once-args")" "cl
 expect_eq "  notification sent at the stop" "$(grep -c 'display notification' "$FAKE/notifications")" "1"
 
 run $'0 12\n0 13 ready' codex 10
-expect_eq "codex runtime is passed on" "$(head -1 "$FAKE/once-args")" "codex 10"
+expect "codex is rejected with a message" 1 "Codex nie uruchamia już Ralpha"
+expect_eq "  and once is never called" "$(runs)" "0"
 
 run $'0 12\n0 13 ready' 10 --force-model=opus
 expect_eq "--force-model is passed on to every run" "$(grep -c -- '--force-model=opus' "$FAKE/once-args")" "2"

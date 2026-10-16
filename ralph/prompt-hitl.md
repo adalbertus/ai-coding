@@ -16,21 +16,37 @@ and tell the human, in your first message, what decision or action is needed fro
 recommendation and the reasoning behind it. Then wait for their answer. If the issue turns out to
 need nothing from them after all, say so and go on.
 
-# REPO CONTRACT (## Ralph in {AGENT_CONTRACT_FILE})
+# REPO CONTRACT (## Ralph in CLAUDE.md)
 
 Everything specific to THIS repo — the feedback-loop commands to run, what "done" means
 (done-criteria), and any commit conventions — lives in the `## Ralph` section of this repo's
-{AGENT_CONTRACT_FILE}. Read it now and follow it.
+CLAUDE.md. Read it now and follow it.
 
 # EXPLORATION
 
-{EXPLORE_GUIDANCE}
+Explore the repo. Note its structure and conventions (CLAUDE.md), and the existing tests that
+the `## Ralph` feedback loops run.
+
+**Search before you read.** A full `Read` of a large reference file (a glossary, a big module)
+can cost tens of thousands of tokens, and every one of them stays in context for the rest of the
+run — degrading your own reasoning exactly when the implementation needs it. So:
+
+- **If you can name what you are looking for** — a term, a symbol, a function, a path — use
+  `Grep`/`Glob`, then `Read` only the matching range (`offset`/`limit`). This is the default, and
+  it is not a compromise: it returns the exact source text, just less of it.
+- **Only if you cannot formulate a search pattern**, because you need an overview rather than a
+  specific fact, delegate to the `Explore` subagent. It reads in its own context and returns
+  conclusions. It costs a full extra model run and gives you a paraphrase instead of the source,
+  so it earns its keep for open-ended reconnaissance and nothing else.
+
+This is how to read an instruction like "read `CONTEXT.md` before introducing a new term" in a
+repo's CLAUDE.md: **consult** that file for what you need. Do not pull all of it into context.
 
 # IMPLEMENTATION
 
-Use {SKILL_TDD} to complete the task. Keep risky logic (parsing, the data layer, business rules,
+Use /tdd to complete the task. Keep risky logic (parsing, the data layer, business rules,
 date math) in isolated, unit-testable modules, following this repo's conventions. Where
-{SKILL_TDD} asks you to confirm seams, ask the human.
+/tdd asks you to confirm seams, ask the human.
 
 If the issue has a `## Przypadki do przetestowania` section, write one test per listed case,
 named so the case is recognisable, asserting the expected outcome the case states. Tell the
