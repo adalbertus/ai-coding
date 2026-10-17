@@ -340,7 +340,9 @@ issue — szczegóły i uzasadnienie w `docs/adr/0012`. Każda praca jest epicem
 zmiana (epic z jednym sub-issue). Terminologia: `CONTEXT.md` (**Epic**, **Odbiór**).
 
 1. **`/ralph-konfiguracja`** — raz na repo. Wykrywa stack, pisze
-   `## Ralph` do `CLAUDE.md`, tworzy labelki pętli na GitHubie.
+   `## Ralph` do `CLAUDE.md`, tworzy labelki pętli na GitHubie. Proponuje też (niczego sam nie instaluje) Larastana w repo PHP
+   i testy zrzutów ekranu Playwrighta w projekcie z interfejsem webowym — jeśli repo nie ma
+   jeszcze takiego narzędzia; po zgodzie zakłada to jako epic w repo aplikacji.
 2. **Grill → `/to-issues-ralph` → `/clear` → `/to-issues-ralph <nr>`.**
    `/to-issues-ralph` bez argumentu uzupełnia PRD o ustalenia z grilla, których w nim brakuje
    (bez pytań; to, co jest już w ADR/`CONTEXT.md`, tylko wskazuje), publikuje epic (`[PRD]` ze

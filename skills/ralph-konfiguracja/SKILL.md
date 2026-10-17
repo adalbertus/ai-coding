@@ -27,6 +27,8 @@ the user before writing.
 3. Where it applies: a **reworded** instruction elsewhere in `CLAUDE.md` / `AGENTS.md` (Codex still reads `AGENTS.md` in ordinary sessions), so agents
    consult large reference files instead of reading them whole (proposed to the user, never
    silent).
+4. Where it applies: proposals (never installed here) for Larastan and screenshot tests, to be
+   set up later as an epic.
 
 ## Workflow
 
@@ -257,12 +259,40 @@ that the exploration protocol handles it anyway and the reword is noise.
 
 Skip the step entirely when the repo has no large reference file. See `docs/adr/0005`.
 
-### 8. Hand back
+### 8. Propose quality tools (only proposals — install nothing)
+
+Two optional additions that strengthen the gate. Detect each, and propose it **only** when the
+repo lacks it. A repo that already has the tool gets no proposal — say nothing about it. Ask as a
+chat question in Polish, with your recommendation and its reasoning. Install and configure
+nothing in this session, and without consent change nothing at all.
+
+**Larastan** — detect a PHP repo (`composer.json`) without it: no `larastan/larastan` (or legacy
+`nunomaduro/larastan`) in `require-dev`, no `phpstan.neon` / `phpstan.neon.dist`. Explain, in
+Polish:
+
+- what it gives: static analysis catches type errors and wrong calls without running the code;
+- how to start: a low level (e.g. 1–2) with a baseline (`--generate-baseline`), so existing code
+  does not block the gate; raise the level later;
+- that once adopted it joins `ralph-gate:` (and the feedback loops list).
+
+**Screenshot tests** — detect a project with a web interface (a frontend in `package.json` such as
+React/Vue/Svelte/Next/Vite, or Blade/Livewire/Inertia views) without screenshot tests: no
+`toHaveScreenshot` in the test sources, no Playwright snapshot directories. Explain, in Polish:
+
+- what it is: Playwright `toHaveScreenshot` at two widths — phone (about 390 px) and desktop;
+- the rules: fixed test data, baselines generated with `--update-snapshots` and committed, so a
+  baseline change shows up in the diff;
+- what it catches, e.g. a table that breaks on a small screen, which unit tests never see.
+
+**When the user agrees**, do not do the work here. Propose setting it up as an epic in the app
+repo — through a grill, or `/to-issues-ralph` — and point the user at that next step.
+
+### 9. Hand back
 
 Tell the user in one or two Polish sentences what was written and what is next: that
 `ralph-once` / `ralph-epic` (or `ralph-once-local`) in Claude will now pass the strażnik in
 this repo, and that issues get triaged with `/to-issues-ralph`. Mention the `AGENTS.md` cleanup
-and the reword from step 7 only if they happened.
+and the reword from step 7 only if they happened; the proposals from step 8 only if you made any.
 
 ## Notes
 
