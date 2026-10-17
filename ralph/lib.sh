@@ -812,8 +812,21 @@ ralph_outcome_message() {
     "$RALPH_EXIT_DISCOVERED") ralph_say warn "⚠ Issue #${num} wymaga człowieka: worker zdjął ready-for-agent (odkryty HITL)." ;;
     "$RALPH_EXIT_HITL_OPEN") ralph_say warn "⚠ Sesja HITL skończona, issue #${num} nadal otwarte bez ready-for-agent." ;;
     "$RALPH_EXIT_REVIEW_RETRY") ralph_say warn "⚠ Przegląd odrzucił issue #${num} — otwarte ponownie, poprawka w następnej iteracji." ;;
-    *) ralph_say err "✗ Nie udało się odczytać stanu issue #${num} po runie." ;;
+    *) ralph_say err "✗ Nie udało się odczytać stanu issue #${num} z GitHuba (gh) po runie." ;;
   esac
+}
+
+# $1: issue number -> `open` or `closed`. gh is retried (RALPH_GH_TRIES attempts,
+# RALPH_GH_RETRY_DELAY seconds apart), so a brief outage — a network blip, `brew upgrade gh` —
+# does not decide the run. rc 1 when GitHub still gave no clean answer.
+ralph_issue_state() {
+  local tries="${RALPH_GH_TRIES:-3}" state i
+  for ((i = 1; i <= tries; i++)); do
+    state=$(gh issue view "$1" --json state --jq '.state | ascii_downcase' 2>/dev/null)
+    case "$state" in open|closed) echo "$state"; return 0 ;; esac
+    [ "$i" -lt "$tries" ] && sleep "${RALPH_GH_RETRY_DELAY:-5}"
+  done
+  return 1
 }
 
 # Pure: the exit code for a finished worker run. $1: mode (afk|hitl); $2: issue state
@@ -1242,9 +1255,18 @@ $(ralph_gate_tail "$log")
 # the run left open is none of its business.
 ralph_verify_closed() {
   local num="$1" mode="$2" complexity="$3" pre_head="$4" issue="$5"
+  local state
   RALPH_GATE_EXIT=""
   RALPH_REVIEW_EXIT=""
-  [ "$(gh issue view "$num" --json state --jq '.state | ascii_downcase' 2>/dev/null)" = closed ] || return 0
+  # Fail-closed: an unreadable state must not pass for "left open", or a closed issue would skip
+  # the bramka and the przegląd and count as done on the worker's word alone.
+  if ! state=$(ralph_issue_state "$num"); then
+    ralph_say err "✗ Nie mogę odczytać stanu issue #${num} z GitHuba (gh) — bramka i przegląd heavy NIE zostały uruchomione.
+Napraw gh, potem sprawdź issue: jeśli worker je zamknął, otwórz je ponownie z ready-for-agent (gh issue reopen ${num} && gh issue edit ${num} --add-label ready-for-agent) — następny run zobaczy gotową pracę, zamknie issue i przejdzie bramkę."
+    RALPH_GATE_EXIT="$RALPH_EXIT_ERROR"
+    return 0
+  fi
+  [ "$state" = closed ] || return 0
   ralph_gate_check "$num"
   [ -z "$RALPH_GATE_EXIT" ] || return 0
   # Przegląd heavy (ADR 0016) follows the label alone, --force-model included; a HITL session
@@ -1706,7 +1728,7 @@ ralph_finish_run() {
   ralph_warn_dirty_tree
 
   # The result of the run is the state of the issue afterwards, not the worker's own exit status.
-  state=$(gh issue view "$num" --json state --jq '.state | ascii_downcase' 2>/dev/null)
+  state=$(ralph_issue_state "$num")
   has_label=$(gh issue view "$num" --json labels --jq 'any(.labels[]; .name == "ready-for-agent")' 2>/dev/null)
   outcome=$(ralph_run_outcome "$mode" "$state" "$has_label")
   [ -n "${RALPH_REVIEW_EXIT:-}" ] && outcome="$RALPH_REVIEW_EXIT"

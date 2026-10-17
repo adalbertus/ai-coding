@@ -6,6 +6,8 @@ SCRIPT_DIR="$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")" && pwd)"
 # Plain, unclipped output whatever terminal the tests run in; colour and clipping are tested
 # explicitly.
 export RALPH_COLOR=0 RALPH_COLS=0
+# gh retries in ralph_issue_state must not slow the suite down.
+export RALPH_GH_RETRY_DELAY=0
 # A worker or przegląd running these tests under ralph-epic inherits the run's variables; without
 # this, the tests would write test issue numbers into the real run's issue file, expect fds 3/4
 # that are not open, render reports under the reviewer's title, and name the epic's launch command.
@@ -436,7 +438,7 @@ expect_eq "verdict: AFK failed" "$(ralph_outcome_message 3 7)" "✗ Issue #7 nie
 expect_eq "verdict: discovered HITL" "$(ralph_outcome_message 4 7)" "⚠ Issue #7 wymaga człowieka: worker zdjął ready-for-agent (odkryty HITL)."
 expect_eq "verdict: HITL unresolved" "$(ralph_outcome_message 5 7)" "⚠ Sesja HITL skończona, issue #7 nadal otwarte bez ready-for-agent."
 expect_eq "verdict: HITL handed back" "$(ralph_outcome_message 6 7)" "✓ Issue #7 oddane pętli (przywrócone ready-for-agent)."
-expect_eq "verdict: unreadable state" "$(ralph_outcome_message 1 7)" "✗ Nie udało się odczytać stanu issue #7 po runie."
+expect_eq "verdict: unreadable state" "$(ralph_outcome_message 1 7)" "✗ Nie udało się odczytać stanu issue #7 z GitHuba (gh) po runie."
 case "$(RALPH_COLOR=1 ralph_outcome_message 0 7)$(RALPH_COLOR=1 ralph_outcome_message 3 7)$(RALPH_COLOR=1 ralph_outcome_message 4 7)" in
   $'\e[32m✓'*$'\e[31m✗'*$'\e[38;5;208m⚠'*) r=yes ;;
   *) r=no ;;
@@ -953,9 +955,15 @@ gate_case() {
       git checkout -q -b epic/45 && mkdir -p t && echo x > "$GATE_EPIC_FILE" && git add -A \
         && git -c user.email=t@t -c user.name=t commit -q -m epic && git checkout -q main
     fi
-    gh_calls=$(mktemp); reviewed=no
+    gh_calls=$(mktemp); flaky=$(mktemp); reviewed=no
     gh() {
-      if [ "$1 $2" = "issue view" ]; then echo "$g_state"
+      if [ "$1 $2" = "issue view" ]; then
+        # unreadable: gh never answers; flaky: the first call fails, later ones say closed.
+        case "$g_state" in
+          unreadable) return 1 ;;
+          flaky) if [ ! -s "$flaky" ]; then echo x > "$flaky"; return 1; fi; echo closed ;;
+          *) echo "$g_state" ;;
+        esac
       elif [ "$1" = api ] && [[ "$2" == */parent ]]; then
         if [ -n "${GATE_PARENT:-}" ]; then echo "$GATE_PARENT"; else echo '{"status":"404"}'; return 1; fi
       elif [ "$1" = api ]; then jq -s -c . "$GATE_COMMENTS"
@@ -975,7 +983,7 @@ gate_case() {
     printf '%s|%s|' "${RALPH_GATE_EXIT:-none}" "$reviewed"
     tr '\n' ';' < "$gh_calls"
     grep -q -F "$RALPH_GATE_FAIL_MARKER" "$GATE_FULL" && printf '|marker'
-    rm -rf "$repo" "$gh_calls"
+    rm -rf "$repo" "$gh_calls" "$flaky"
   )
 }
 ran() { grep -c ran "$GATE_RAN" | tr -d ' '; }
@@ -991,6 +999,10 @@ expect_eq "gate: przegląd heavy markers are not gate failures (first red is sti
   "$(gate_case 'exit 1' 0 closed afk heavy 1 | cut -d'|' -f1)" "7"
 expect_eq "gate: the issue was left open by the run -> gate not run" \
   "$(gate_case 'echo ran >> "$GATE_RAN"' 0 open)|$(ran)" "none|no||0"
+expect_eq "gate: state unreadable (gh down) -> error, neither gate nor przegląd runs" \
+  "$(gate_case 'echo ran >> "$GATE_RAN"' 0 unreadable afk heavy)|$(ran)" "1|no||0"
+expect_eq "gate: gh fails once, then answers closed -> gate and przegląd heavy run" \
+  "$(gate_case 'echo ran >> "$GATE_RAN"' 0 flaky afk heavy)|$(ran)" "none|yes||1"
 expect_eq "gate: heavy issue, gate red -> przegląd heavy never runs" \
   "$(gate_case 'exit 1' 0 closed afk heavy | cut -d'|' -f1-2)" "7|no"
 expect_eq "gate: heavy issue, gate green -> przegląd heavy runs" \
