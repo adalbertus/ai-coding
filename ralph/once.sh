@@ -20,13 +20,16 @@
 #   4  AFK run left the issue open without `ready-for-agent` (discovered HITL)
 #   5  HITL session ended, issue open without `ready-for-agent` (unresolved)
 #   6  HITL session ended, issue open with `ready-for-agent` restored (handed back to AFK)
-#   7  przegląd heavy failed once: the issue is reopened with its notes for one fix (ADR 0016)
+#   7  przegląd heavy or the bramka failed once: the issue is reopened with its notes for one fix
+#      (ADR 0016, ADR 0018); a second failure of either gives 3 (AFK failed, a human is needed)
 #   8  a usage limit stopped the run and its reset is too far to wait for; the ślad is left so the
 #      next run resumes the same session (ADR 0017)
 #
 # Wznowienie po limicie (ADR 0017): a Claude worker or przegląd heavy cut off by a usage limit
 # waits for the reset (up to 6 h) and resumes its session. A later run finds the ślad and resumes
 # before anything else — the gate, the strażnik and the clean-tree check do not apply to it.
+# A resumed worker that closed the issue goes through the bramka like any run; a resumed przegląd
+# heavy does not run it again (the bramka was green before the przegląd began).
 
 # Self-locate: this script + its sibling prompts/guard live together (in the shared ralph/
 # dir, reached via a symlink on PATH). `realpath` resolves that symlink so prompts are read
@@ -61,14 +64,9 @@ after_worker() {
     [ -n "$cost" ] && ralph_say dim "Koszt workera: $cost"
   fi
 
-  # Przegląd heavy (ADR 0016): an AFK run that closed a heavy issue is reviewed by the stronger
-  # model before anything counts it as done — so before the epic can be marked for acceptance.
-  # It follows the label alone, --force-model included; a HITL session had a human present.
-  RALPH_REVIEW_EXIT=""
-  if [ "$mode" = afk ] && [ "$complexity" = heavy ] && [ -n "$pre_head" ] \
-      && [ "$(gh issue view "$num" --json state --jq '.state | ascii_downcase' 2>/dev/null)" = closed ]; then
-    ralph_heavy_review "$num" "$pre_head" "$issue"
-  fi
+  # The bramka (ADR 0018) and, after a green one, the przegląd heavy (ADR 0016): both before the
+  # epic can be marked for acceptance or anything counts the issue as done.
+  ralph_verify_closed "$num" "$mode" "$complexity" "$pre_head" "$issue"
   finish_run
 }
 
@@ -77,8 +75,9 @@ finish_run() {
   local state has_label outcome
   exit_on_limit_stop
 
-  # The worker may have closed the last sub-issue of an epic: mark it for acceptance.
-  ralph_mark_ready_epics
+  # The worker may have closed the last sub-issue of an epic: mark it for acceptance. Not when the
+  # bramka could not even run (no gate line): that issue is not verified.
+  [ "${RALPH_GATE_EXIT:-}" = "$RALPH_EXIT_ERROR" ] || ralph_mark_ready_epics
 
   # Auto mode denies without prompting, so a run that could not finish (e.g. the commit was
   # blocked) now ends quietly. Uncommitted leftovers would poison the NEXT run — say it out loud.
@@ -88,8 +87,13 @@ finish_run() {
   state=$(gh issue view "$num" --json state --jq '.state | ascii_downcase' 2>/dev/null)
   has_label=$(gh issue view "$num" --json labels --jq 'any(.labels[]; .name == "ready-for-agent")' 2>/dev/null)
   outcome=$(ralph_run_outcome "$mode" "$state" "$has_label")
-  [ -n "$RALPH_REVIEW_EXIT" ] && outcome="$RALPH_REVIEW_EXIT"
-  ralph_outcome_message "$outcome" "$num"
+  [ -n "${RALPH_REVIEW_EXIT:-}" ] && outcome="$RALPH_REVIEW_EXIT"
+  if [ -n "${RALPH_GATE_EXIT:-}" ]; then
+    # The bramka already said what happened on screen; the generic line would blame a przegląd.
+    outcome="$RALPH_GATE_EXIT"
+  else
+    ralph_outcome_message "$outcome" "$num"
+  fi
   exit "$outcome"
 }
 

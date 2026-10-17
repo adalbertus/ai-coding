@@ -193,6 +193,20 @@ Dwa flavoury, jeden zestaw promptów:
 `complexity:*`: każde issue jedzie na wskazanym modelu z effort high, także sesja HITL. Flaga może
 stać w dowolnym miejscu. Strażnik i selektor zostają na Haiku.
 
+**Bramka po zamkniętym issue** (ADR 0018). Po każdym runie, który zamknął issue (AFK, sesja HITL,
+wznowiony worker), `ralph-once` sam uruchamia komendę z linii `ralph-gate:` w katalogu głównym repo,
+zanim uzna issue za zrobione. Kolejność: bramka → przy zielonej i `complexity:heavy` przegląd heavy
+→ oznaczenie epicu do odbioru → werdykt runu. Na ekranie: start, czas i wynik; pełne wyjście
+w `.git/ralph-logs/<czas>-gate-<nr>.log`. Run, który zostawił issue otwarte, bramki nie uruchamia.
+- czerwona pierwszy raz — issue wraca otwarte z `ready-for-agent` i komentarzem (marker bramki,
+  koniec wyjścia, ścieżka logu), epic nie dostaje `needs-human-test`, run kończy się kodem 7
+  i `ralph-epic` jedzie dalej;
+- czerwona drugi raz na tym samym issue — issue wraca otwarte, a `ralph-epic` staje (kod 3,
+  potrzebny człowiek). Powtórzenie czerwonej bramki i niestabilne testy to jeszcze nie ta wersja:
+  czerwona znaczy czerwona;
+- brak linii `ralph-gate:` w chwili runu — błąd (kod 1), nigdy cicha zielona. Wznowiony przegląd
+  heavy nie uruchamia bramki ponownie (była zielona, zanim przegląd ruszył).
+
 **`complexity:heavy`** nie oznacza już silniejszego implementera (ADR 0016). Issue implementuje
 model `normal` z effort high (Claude: Sonnet). Wyrocznią jest sekcja `## Przypadki do
 przetestowania`, którą `to-issues-ralph` pisze przy rozbiciu: worker pisze jeden test na każdy
@@ -368,13 +382,13 @@ runie, nie z wyniku procesu workera):
 | Kod | Znaczenie |
 |-----|-----------|
 | 0 | issue domknięte |
-| 1 | błąd lub odmowa: złe argumenty, brak issue, zajęty lock, strażnik, brudne drzewo, konflikt scalania, przegląd heavy bez werdyktu |
+| 1 | błąd lub odmowa: złe argumenty, brak issue, zajęty lock, strażnik, brudne drzewo, konflikt scalania, przegląd heavy bez werdyktu, brak linii `ralph-gate:` |
 | 2 | nic do zrobienia: bramka `needs-human-test`, epic w odbiorze, brak lub zablokowani kandydaci, `NO_TASK` |
-| 3 | run AFK zostawił issue otwarte i nadal z `ready-for-agent` (porażka, praca niedokończona; także drugi odrzut przeglądu heavy) |
+| 3 | run AFK zostawił issue otwarte i nadal z `ready-for-agent` (porażka, praca niedokończona; także drugi odrzut przeglądu heavy albo druga czerwona bramka) |
 | 4 | run AFK zostawił issue otwarte bez `ready-for-agent` (odkryty HITL) |
 | 5 | sesja HITL skończona, issue otwarte i bez `ready-for-agent` (nierozwiązane) |
 | 6 | sesja HITL skończona, issue otwarte z przywróconym `ready-for-agent` (wraca do AFK) |
-| 7 | przegląd heavy odrzucił issue pierwszy raz: otwarte ponownie z uwagami, poprawka w następnym runie |
+| 7 | przegląd heavy odrzucił issue albo bramka była czerwona pierwszy raz: otwarte ponownie z uwagami, poprawka w następnym runie |
 | 8 | limit użycia przerwał run, a reset jest dalej niż 6 h; ślad zostaje do wznowienia (niżej) |
 
 **Wznowienie po limicie użycia** (tylko Claude, ADR 0017). Gdy worker albo przegląd heavy trafi

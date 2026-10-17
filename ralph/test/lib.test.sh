@@ -768,6 +768,98 @@ expect_eq "heavy review: second FAIL -> reopen, AFK-failed code" \
 expect_eq "heavy review: no verdict -> reopen without the marker, error code" \
   "$(review_case 'I could not decide' 0)" "1|issue reopen 12;issue edit 12;issue comment 12;"
 
+# --- Bramka uruchamiana przez pętlę po zamkniętym issue (ADR 0018) ---
+expect_eq "gate action: green -> ok" "$(ralph_gate_action 0 0)" "ok"
+expect_eq "gate action: green after an earlier red -> ok" "$(ralph_gate_action 0 1)" "ok"
+expect_eq "gate action: first red -> retry" "$(ralph_gate_action 1 0)" "retry"
+expect_eq "gate action: second red -> stop" "$(ralph_gate_action 2 1)" "stop"
+
+gate_tail_file=$(mktemp)
+seq 1 100000 > "$gate_tail_file"
+gate_tail_out=$(ralph_gate_tail "$gate_tail_file")
+expect_eq "gate tail: bounded in size, ends with the last line" \
+  "$([ "${#gate_tail_out}" -le 8000 ] && tail -1 <<<"$gate_tail_out")" "100000"
+expect_eq "gate tail: short output kept whole" "$(printf 'a\nb\n' > "$gate_tail_file"; ralph_gate_tail "$gate_tail_file")" "a
+b"
+rm -f "$gate_tail_file"
+
+gate_comments_case() {
+  (
+    gh() { jq -c -n --arg g "$RALPH_GATE_FAIL_MARKER" --arg r "$RALPH_REVIEW_FAIL_MARKER" \
+      '[{body: ($g + "\nbramka")}, {body: ($r + "\nprzegląd")}, {body: "other"}, {body: ($g + "\nbramka 2")}]'; }
+    printf '%s|%s' "$(ralph_gate_fail_count 5)" "$(ralph_review_fail_count 5)"
+  )
+}
+expect_eq "gate failure markers and przegląd markers are counted apart" "$(gate_comments_case)" "2|1"
+
+# ralph_verify_closed end to end in a throwaway repo whose CLAUDE.md declares the gate; gh and
+# the heavy review are stubs. $1: gate command (empty = section without the line), $2: earlier
+# gate failures on the issue, $3: issue state, $4: mode, $5: complexity, $6: earlier przegląd
+# failures. Prints "<RALPH_GATE_EXIT or none>|<review run?>|<gh calls>|<marker>"; the gate's own
+# runs are appended to $GATE_RAN, the full gh arguments land in $GATE_FULL.
+export GATE_RAN; GATE_RAN=$(mktemp)
+GATE_FULL=$(mktemp)
+gate_case() {
+  local g_cmd="$1" g_prior="$2" g_state="${3:-closed}" g_mode="${4:-afk}" g_cx="${5:-normal}" g_review_prior="${6:-0}"
+  : > "$GATE_RAN"; : > "$GATE_FULL"
+  (
+    repo=$(mktemp -d); cd "$repo" && git init -q
+    if [ -n "$g_cmd" ]; then printf '# T\n\n## Ralph\n\nralph-gate: %s\n' "$g_cmd" > CLAUDE.md
+    else printf '# T\n\n## Ralph\n\nbez linii bramki\n' > CLAUDE.md; fi
+    gh_calls=$(mktemp); reviewed=no
+    gh() {
+      if [ "$1 $2" = "issue view" ]; then echo "$g_state"
+      elif [ "$1" = api ]; then
+        jq -c -n --arg g "$RALPH_GATE_FAIL_MARKER" --arg r "$RALPH_REVIEW_FAIL_MARKER" --argjson gp "$g_prior" --argjson rp "$g_review_prior" \
+          '[range($gp) | {body: ($g + "\nold")}] + [range($rp) | {body: ($r + "\nold")}]'
+      else echo "$1 $2 $3" >> "$gh_calls"; printf '%s\n' "$*" >> "$GATE_FULL"; fi
+    }
+    ralph_heavy_review() { reviewed=yes; }
+    ralph_verify_closed 12 "$g_mode" "$g_cx" abc123 "## Issue #12: t" >/dev/null
+    printf '%s|%s|' "${RALPH_GATE_EXIT:-none}" "$reviewed"
+    tr '\n' ';' < "$gh_calls"
+    grep -q -F "$RALPH_GATE_FAIL_MARKER" "$GATE_FULL" && printf '|marker'
+    rm -rf "$repo" "$gh_calls"
+  )
+}
+ran() { grep -c ran "$GATE_RAN" | tr -d ' '; }
+
+expect_eq "gate: AFK closes a plain issue, gate green -> nothing changes, gate ran once" \
+  "$(gate_case 'echo ran >> "$GATE_RAN"' 0)|$(ran)" "none|no||1"
+expect_eq "gate: red -> reopen + label + marked comment, retry code (7), epic not marked" \
+  "$(gate_case 'echo ran >> "$GATE_RAN"; exit 1' 0)" "7|no|issue reopen 12;issue edit 12;issue comment 12;|marker"
+expect_eq "gate: red label is ready-for-agent" "$(grep -c 'issue edit 12 --add-label ready-for-agent' "$GATE_FULL")" "1"
+expect_eq "gate: second red on the same issue -> reopen, AFK-failed code (3)" \
+  "$(gate_case 'exit 1' 1)" "3|no|issue reopen 12;issue edit 12;issue comment 12;|marker"
+expect_eq "gate: przegląd heavy markers are not gate failures (first red is still a retry)" \
+  "$(gate_case 'exit 1' 0 closed afk heavy 1 | cut -d'|' -f1)" "7"
+expect_eq "gate: the issue was left open by the run -> gate not run" \
+  "$(gate_case 'echo ran >> "$GATE_RAN"' 0 open)|$(ran)" "none|no||0"
+expect_eq "gate: heavy issue, gate red -> przegląd heavy never runs" \
+  "$(gate_case 'exit 1' 0 closed afk heavy | cut -d'|' -f1-2)" "7|no"
+expect_eq "gate: heavy issue, gate green -> przegląd heavy runs" \
+  "$(gate_case 'true' 0 closed afk heavy | cut -d'|' -f1-2)" "none|yes"
+expect_eq "gate: HITL session closed a plain issue -> gate runs the same" \
+  "$(gate_case 'echo ran >> "$GATE_RAN"' 0 closed hitl)|$(ran)" "none|no||1"
+expect_eq "gate: HITL session, red -> reopened like after AFK" \
+  "$(gate_case 'exit 1' 0 closed hitl | cut -d'|' -f1)" "7"
+expect_eq "gate: HITL closed a heavy issue, gate green -> no przegląd (a human was there)" \
+  "$(gate_case 'true' 0 closed hitl heavy | cut -d'|' -f1-2)" "none|no"
+expect_eq "gate: nonzero code survives the output going to a log (exit 3 after output)" \
+  "$(gate_case 'echo some output; exit 3' 0 | cut -d'|' -f1)" "7"
+expect_eq "gate: multi-step a && b, the second fails -> red" \
+  "$(gate_case 'true && false' 0 | cut -d'|' -f1)" "7"
+expect_eq "gate: multi-step a && b, the first fails -> b never runs, red" \
+  "$(gate_case 'false && echo ran >> "$GATE_RAN"' 0 | cut -d'|' -f1)|$(ran)" "7|0"
+expect_eq "gate: no ralph-gate: line -> error code (1), no reopen, no przegląd, not green" \
+  "$(gate_case '' 0 closed afk heavy)" "1|no|"
+expect_eq "gate: red comment carries the output tail and the log path" \
+  "$(gate_case 'echo ogon-$((6*7)); exit 1' 0 >/dev/null; grep -c 'ogon-42' "$GATE_FULL")|$(grep -c 'ralph-logs/.*-gate-12.log' "$GATE_FULL")" "1|1"
+gate_case 'seq 1 200000; exit 1' 0 >/dev/null
+expect_eq "gate: very long output -> the comment fits GitHub's limit and ends with the last line" \
+  "$([ "$(wc -c < "$GATE_FULL")" -lt 60000 ] && grep -c '^200000$' "$GATE_FULL")" "1"
+rm -f "$GATE_RAN" "$GATE_FULL"
+
 # --- Limit użycia (ADR 0017) ---
 LIMIT_FIXTURE="$SCRIPT_DIR/fixtures/usage-limit.jsonl"
 SID=92d20c8c-b0e0-4fbc-9256-3fde3852c1e6

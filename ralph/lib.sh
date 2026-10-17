@@ -920,6 +920,101 @@ $report" ;;
   esac
 }
 
+# --- Bramka uruchamiana przez pętlę (ADR 0018): the ralph-gate: command, run after a closed issue. ---
+
+# Marks a red bramka's comment; counting them is how a second red on the same issue is recognised.
+# Distinct from the przegląd marker, so neither kind of failure counts as the other.
+RALPH_GATE_FAIL_MARKER='<!-- ralph-bramka: FAIL -->'
+
+# Pure. $1: the gate command's exit code, $2: red bramki of this issue before this one -> ok
+# (green), retry (red: reopen for one fix) or stop (second red: reopen, stop for a human).
+ralph_gate_action() {
+  if [ "$1" = 0 ]; then echo ok
+  elif [ "${2:-0}" -ge 1 ]; then echo stop
+  else echo retry
+  fi
+}
+
+# Pure. $1: a gate log -> its tail, bounded in lines and bytes so a comment stays far below
+# GitHub's limit. Bytes cut in the middle of a character are dropped.
+ralph_gate_tail() {
+  tail -n 80 "$1" | tail -c 8000 | { iconv -c -f UTF-8 -t UTF-8 2>/dev/null || cat; }
+}
+
+# Red bramki recorded on issue $1 so far; 0 when GitHub cannot answer.
+ralph_gate_fail_count() {
+  gh api --paginate "repos/{owner}/{repo}/issues/$1/comments" 2>/dev/null \
+    | jq -s --arg m "$RALPH_GATE_FAIL_MARKER" '[add // [] | .[] | select(.body | contains($m))] | length' 2>/dev/null \
+    || echo 0
+}
+
+# Runs the ralph-gate: command of this repo (read from CLAUDE.md in the repo root, run there) after
+# the run closed issue $1, and acts on the result. Full output goes to a log in the git dir's
+# ralph-logs/; the screen gets the start, the duration and the verdict. Leaves in RALPH_GATE_EXIT
+# the exit code once.sh should report, or nothing when the bramka is green. The command's own exit
+# code decides: the output goes to a file, not through a pipe that would swallow it. No gate line
+# (the strażnik was skipped) is an error, never a silent green.
+ralph_gate_check() {
+  local num="$1" root cmd dir log start rc prior action body
+  RALPH_GATE_EXIT=""
+  root=$(git rev-parse --show-toplevel 2>/dev/null) || root=.
+  cmd=$(ralph_contract_section "$root/$(ralph_contract_file)" 2>/dev/null | ralph_gate_command) || cmd=""
+  if [ -z "$cmd" ]; then
+    ralph_say err "✗ Brak linii ralph-gate: w sekcji ## Ralph — nie uznaję issue #${num} za zrobione bez bramki. Uruchom /ralph-konfiguracja."
+    RALPH_GATE_EXIT="$RALPH_EXIT_ERROR"
+    return 0
+  fi
+  dir="$(git rev-parse --absolute-git-dir 2>/dev/null)/ralph-logs"
+  if mkdir -p "$dir" 2>/dev/null; then log="$dir/$(date +%Y%m%d-%H%M%S)-gate-${num}.log"; else log=$(mktemp); fi
+  ralph_say dim "Bramka: uruchamiam po issue #${num}: ${cmd}"
+  start=$SECONDS
+  (cd "$root" && bash -c "$cmd") </dev/null >"$log" 2>&1
+  rc=$?
+  if [ "$rc" = 0 ]; then
+    ralph_say ok "✓ Bramka zielona ($((SECONDS - start)) s). Log: $log"
+    return 0
+  fi
+  ralph_say err "✗ Bramka czerwona (kod ${rc}, $((SECONDS - start)) s). Log: $log"
+  prior=$(ralph_gate_fail_count "$num")
+  action=$(ralph_gate_action "$rc" "$prior")
+  body="${RALPH_GATE_FAIL_MARKER}
+Bramka (\`${cmd}\`) jest czerwona po zamknięciu issue (kod ${rc}, próba $((prior + 1)) z 2). Pełne wyjście: ${log}
+
+Koniec wyjścia:
+
+\`\`\`\`
+$(ralph_gate_tail "$log")
+\`\`\`\`"
+  gh issue reopen "$num" >/dev/null 2>&1
+  gh issue edit "$num" --add-label ready-for-agent >/dev/null 2>&1
+  gh issue comment "$num" --body "$body" >/dev/null 2>&1
+  case "$action" in
+    retry) ralph_say warn "Issue #${num} otwarte ponownie — poprawka w następnej iteracji."
+           RALPH_GATE_EXIT="$RALPH_EXIT_REVIEW_RETRY" ;;
+    *)     ralph_say err "✗ Bramka czerwona drugi raz na issue #${num} — zatrzymuję, potrzebny człowiek."
+           RALPH_GATE_EXIT="$RALPH_EXIT_AFK_FAILED" ;;
+  esac
+}
+
+# What the loop checks itself once a run has finished, in order: the bramka after any run that
+# closed issue $1 (AFK, HITL, a resumed worker), then — only after a green one, and only for an
+# AFK heavy issue — the przegląd heavy. $2: mode, $3: complexity, $4: HEAD before the worker,
+# $5: the issue text. Leaves RALPH_GATE_EXIT / RALPH_REVIEW_EXIT (see their functions). An issue
+# the run left open is none of its business.
+ralph_verify_closed() {
+  local num="$1" mode="$2" complexity="$3" pre_head="$4" issue="$5"
+  RALPH_GATE_EXIT=""
+  RALPH_REVIEW_EXIT=""
+  [ "$(gh issue view "$num" --json state --jq '.state | ascii_downcase' 2>/dev/null)" = closed ] || return 0
+  ralph_gate_check "$num"
+  [ -z "$RALPH_GATE_EXIT" ] || return 0
+  # Przegląd heavy (ADR 0016) follows the label alone, --force-model included; a HITL session
+  # had a human present.
+  if [ "$mode" = afk ] && [ "$complexity" = heavy ] && [ -n "$pre_head" ]; then
+    ralph_heavy_review "$num" "$pre_head" "$issue"
+  fi
+}
+
 # Pure. stdin: issues array as the REST API returns it (with `issue_dependencies_summary`).
 # Keeps only free issues: no open blocker in GitHub's native "blocked by" relation. The body
 # text — including its "Blocked by" section — is never read. No summary -> dropped (fail-closed).
