@@ -330,7 +330,7 @@ Prompty są stack-agnostyczne — całą specyfikę repo delegują do sekcji `##
 Sekcja zawiera też done-criteria pod epice (sub-issue zamyka gate, resztę sprawdza odbiór epicu),
 zamknięcie epicu („zamykaj" / „potwierdzam": doc-sync, merge gałęzi epicu do bazy, usunięcie gałęzi,
 zamknięcie) i ścieżkę uwag z odbioru (drobiazg od razu w sesji, rzecz większa jako sub-issue
-`[ISSUE] Poprawka: …`). Linię gałęzi per epic skill wpisuje tylko dla repo z osobną gałęzią
+`[ISSUE] Poprawka: …`); obie sekcje odsyłają do `/odbior`. Linię gałęzi per epic skill wpisuje tylko dla repo z osobną gałęzią
 produkcyjną (np. `main` = produkcja, `dev` = praca).
 
 Sekcję pisze `/ralph-konfiguracja` — nie pisz jej ręcznie.
@@ -432,7 +432,23 @@ wklejenie zrzutu, uwagi ogólne; stan jest trwały między sesjami przeglądarki
 Jeden artefakt na epic — jego URL leży w komentarzu epicu (marker `ralph-odbior-artefakt`) i jest
 używany ponownie; ponowne `/odbior` dla tej samej rundy niczego nie nadpisuje, nowa runda dodaje
 sekcję nad starymi. Strona to szablon `skills/odbior/template.html`, treść kroków trafia do bazy
-artefaktu. Czytanie wyników, poprawki i zamknięcie epicu to osobne zadania (jeszcze nie ma).
+artefaktu.
+
+Przepływ odbioru: lista odbioru (komentarz epicu) → `/odbior <nr>` → artefakt, który przechodzisz
+(można w kawałkach, przez kilka dni) → `/odbior <nr>` jeszcze raz. Drugie uruchomienie, gdy
+artefakt bieżącej rundy ma już werdykty, czyta je z bazy (werdykty, komentarze, zrzuty, uwagi
+ogólne) i działa:
+
+- **drobiazg** — poprawka w tej sesji, w worktree gałęzi epicu; przed każdym commitem bramka
+  (`ralph-gate:`), czerwona = bez commita, sprawa idzie jako „Poprawka”;
+- **większa sprawa** — sub-issue `[ISSUE] Poprawka: …` (`ready-for-agent`, złożoność wg rubryki
+  `to-issues-ralph`, dla `heavy` lista przypadków), marker rundy odbioru
+  (`<!-- ralph-odbior: runda -->`) w epicu i zdjęcie `needs-human-test`; pętla robi poprawki i epic
+  wraca do weryfikacji (numer rundy liczy się od tego markera);
+- **same „OK” i brak uwag** — procedura „Zamknięcie epicu” z `## Ralph` repo;
+- **„zróbmy to inaczej”** — propozycja osobnego grilla zamiast poprawki.
+
+Niekompletny odbiór (kroki bez werdyktu): skill wylicza, co zostało, i niczego nie zamyka.
 
 **Odbiór epicu.** `needs-human-test` na epicu to bezpiecznik: dopóki jest, pętla nie zaczyna nowej
 pracy. Przechodzisz scenariusz z `## Jak odebrać` i:

@@ -1669,6 +1669,14 @@ for odb_pat in 'window\.db' 'window\.assets' 'state:\$\{roundId\}' 'notes:\$\{ro
 done
 expect_eq "odbior: SKILL.md keeps state when the round exists and prepends new rounds" \
   "$(grep -c -E 'do not touch it|prepend' "$ODB/SKILL.md")" "2"
+expect_eq "odbior: act mode covers four paths, incomplete acceptance and gate before commit" \
+  "$(grep -c -E 'Small matter|Larger matter|Let.s do it differently|All OK and no notes|Incomplete acceptance first|Red gate → no commit' "$ODB/SKILL.md")" "6"
+expect_ok "odbior: SKILL.md writes the round marker the verify round counter recognises" \
+  grep -q -F "$RALPH_ODBIOR_MARKER" "$ODB/SKILL.md"
+for odb_sec in 'Zamknięcie epicu' 'Uwagi z odbioru'; do
+  expect_ok "odbior: ralph-konfiguracja template section '$odb_sec' points at /odbior" \
+    bash -c "sed -n '/^### $odb_sec/,/^\(### \|\`\`\`\)/p' \"\$1\" | sed 1d | grep -q '/odbior'" _ "$SCRIPT_DIR/../../skills/ralph-konfiguracja/SKILL.md"
+done
 expect_eq "odbior: install.sh links it for Claude" \
   "$(grep -c '^CLAUDE_ONLY_SKILLS=(odbior)' "$SCRIPT_DIR/../../install.sh")" "1"
 

@@ -169,7 +169,9 @@ także gdy powyżej wskazano inną.>
 
 ### Zamknięcie epicu
 
-Gdy napiszę o epicu z `needs-human-test` „zamykaj" / „potwierdzam" / „zrobione, zamykaj":
+Odbiór epicu z `needs-human-test` prowadzi `/odbior <nr>` (czyta werdykty z artefaktu i zamyka
+epic, gdy wszystko jest OK). Gdy napiszę o takim epicu „zamykaj" / „potwierdzam" / „zrobione,
+zamykaj", albo `/odbior` dojdzie do zamknięcia:
 
 1. <Tylko gdy repo ma doc-sync:> Zsynchronizuj dokumenty statusowe z sekcji Doc-sync (zmianę
    wyprowadź z treści epicu, jego sub-issues i commitów).
@@ -179,7 +181,7 @@ Gdy napiszę o epicu z `needs-human-test` „zamykaj" / „potwierdzam" / „zro
 
 ### Uwagi z odbioru
 
-Gdy przy odbiorze epicu wskażę poprawki:
+Poprawki z odbioru obsługuje `/odbior <nr>`; gdy wskażę je poza nim, obowiązuje to samo:
 
 - Drobiazg: popraw od razu w tej sesji <Epic branch: na gałęzi epicu> i zrób commit.
 - Rzecz większa: załóż nowe sub-issue `[ISSUE] Poprawka: …` pod tym epicem (z labelką
