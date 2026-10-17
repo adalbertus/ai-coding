@@ -52,8 +52,8 @@ _Avoid_: workflow (as a synonym), proces.
 
 Autonomiczny, jednozadaniowy loop implementacyjny odpalany z terminala (AFK). Jeden komplet
 skryptów i promptów wspólny dla wszystkich repo; to, co per-stack (jak testować, kiedy
-„done"), żyje w sekcji `## Ralph` w natywnym kontrakcie agenta repo. Zob. `docs/adr/0002`,
-`docs/adr/0009`.
+„done"), żyje w sekcji `## Ralph` w `CLAUDE.md` repo. Zob. `docs/adr/0002`,
+`docs/adr/0020`.
 
 **Pętla Ralpha** (Ralph loop):
 An autonomous run that takes exactly ONE task end-to-end — pick → implement → test → commit —
@@ -62,25 +62,13 @@ local (`issues/*.md`, single fixed model).
 _Avoid_: agent, automat, bot.
 
 **Runtime agenta** (agent runtime):
-The agent CLI family selected for one Ralph run. The runtime owns every model-backed step in
-that run — selector, preflight guard, and worker — so `ralph-once codex` means a Codex run and
-`ralph-once claude` means a Claude run. The runtime choice must not change the task semantics.
-_Avoid_: using it to mean only the worker, or mixing selector/guard from one runtime with a
-worker from another without saying so explicitly. Zob. `docs/adr/0009`.
-
-**Adapter runtime’u** (runtime adapter):
-The narrow translation layer between Ralph's shared concepts and a concrete CLI: command flags,
-model selection, approval/sandbox mode, and prompt wording — including **whole paragraphs** of a
-prompt section, not only single nouns, wherever the two runtimes do the same thing in a different
-number of steps (see **protokół eksploracji**). It adapts invocation mechanics; it does not own
-task policy, done-criteria, labels, or repo-specific testing rules — that boundary is what keeps
-it narrow now that it renders prose. Zob. `docs/adr/0010`.
-_Avoid_: copying the whole Ralph implementation per agent; putting task policy into a branch
-because it was convenient to phrase it there.
+The agent CLI family that runs a model step (Claude or Codex). Ralph runs only on Claude — every
+model-backed step of a run (selector, preflight guard, worker, przegląd) is a Claude call. Codex
+is a runtime for skills (`$...`) only. Zob. `docs/adr/0020`.
+_Avoid_: speaking of a Codex Ralph run or of runtime parity; both were retired.
 
 **Worker**:
-The model run that actually implements the selected task (explores, uses the runtime's TDD skill
-syntax, commits). Distinct from the **selektor** (only picks the next task) and the **strażnik**
+The model run that actually implements the selected task (explores, uses `/tdd`, commits). Distinct from the **selektor** (only picks the next task) and the **strażnik**
 (only gates).
 
 **Protokół eksploracji** (exploration protocol):
@@ -88,14 +76,10 @@ The rule for how the worker gets facts out of a repo: locate first, then read on
 range, and never pull a whole reference file into context. Deliberately **size-blind** — the
 criterion is whether the worker can name what it is looking for, not how big the file is (it
 cannot know that before reading). Guards the *smart zone*: context spent on wholesale reads is
-context missing from the implementation. The rule is one; its **wording is rendered per runtime**
-(`ralph_explore_guidance()` in `ralph/lib.sh`), because "locate, then read the range" is one tool
-with two parameters under Claude Code and two shell commands under Codex. The subagent escape
-hatch is part of the Claude branch only — its cost is measured there. Zob. `docs/adr/0005`,
-`docs/adr/0010`.
+context missing from the implementation. The `Explore` subagent is the escape hatch for when the
+worker cannot name what it is looking for. Zob. `docs/adr/0005`.
 _Avoid_: „budżet kontekstu" (a token budget the model has no way to measure); a per-repo list of
-large files (it rots, and the protocol does not need it); describing the protocol in one runtime's
-tool names as if they were the protocol itself.
+large files (it rots, and the protocol does not need it).
 
 **Selektor** (selector):
 A cheap-model run that, from the open tasks, picks the single next one — it implements nothing.
@@ -109,12 +93,9 @@ _Avoid_: deriving blockers from body text.
 
 **Strażnik** (preflight guard):
 A fail-closed gate run before any work (in `ralph/preflight.sh`): `grep` for the `## Ralph`
-section in the selected runtime's native contract file, then a cheap runtime-selected check that
-it actually holds runnable instructions. Missing → the loop refuses to start and points to
-`ralph-konfiguracja`. It also gates **contract drift**: where a repo carries both contract files
-and both declare `## Ralph`, the two sections must match (modulo trailing whitespace and blank
-lines) or the run halts with a diff — otherwise the runtime you launch less often quietly works
-off stale rules. Never guesses how to test. Zob. `docs/adr/0010`.
+section in `CLAUDE.md`, then a cheap model check that it actually holds runnable instructions.
+Missing → the loop refuses to start and points to `/ralph-konfiguracja`. `AGENTS.md` is never
+read. Never guesses how to test. Zob. `docs/adr/0020`.
 _Avoid_: walidacja, check.
 
 **Lock worktree Ralpha** (Ralph worktree lock):
@@ -127,12 +108,11 @@ run removes it and continues.
 _Avoid_: per-issue locks like `224.lock`; they do not protect the worktree.
 
 **Kontrakt agenta** (agent contract):
-The runtime-native repo instructions that declare the repo's way of working. For Ralph, the
-contract is the `## Ralph` section mirrored into the native files the selected runtime reads
-(for example `CLAUDE.md` and `AGENTS.md`). The contract contains feedback loops to run before a
-commit and done-criteria; it is the ONLY place stack-specific differences live.
-_Avoid_: treating `CLAUDE.md` as the conceptual source of truth once multiple runtimes are
-supported.
+The runtime-native repo instructions that declare the repo's way of working (`CLAUDE.md`,
+`AGENTS.md`). For Ralph, the contract is the `## Ralph` section in `CLAUDE.md` only: feedback
+loops to run before a commit and done-criteria; it is the ONLY place stack-specific differences
+live.
+_Avoid_: a copy of `## Ralph` in `AGENTS.md` — a dead copy drifts and misleads Codex sessions.
 
 **Sekcja `## Ralph`** (Ralph contract section):
 The part of the agent contract where a repo declares its own way of working for Ralph: the
@@ -377,8 +357,8 @@ _Avoid_: copying `grill-with-docs`' prompt instead of framing it.
   sesja jest czysta. Następny krok: implementacja, zacznij od #1. Ruszamy?
 
 **Ralph — strażnik blokuje** (terminal, repo bez kontraktu):
-— `ralph-once codex`
-— ✋ Brak sekcji „## Ralph" z instrukcjami testowania. Odpal w sesji Codex: `$ralph-konfiguracja`
-— `$ralph-konfiguracja` wykrywa stack, dopisuje `## Ralph` do `CLAUDE.md` i `AGENTS.md`, zakłada
-  labelki. Potem `ralph-once codex` rusza: selektor wybiera issue (wg complexity → model),
-  worker implementuje, testuje, commituje.
+— `ralph-once`
+— ✋ Brak sekcji „## Ralph" z instrukcjami testowania. Odpal w sesji Claude: `/ralph-konfiguracja`
+— `/ralph-konfiguracja` wykrywa stack, dopisuje `## Ralph` do `CLAUDE.md`, zakłada labelki.
+  Potem `ralph-once` rusza: selektor wybiera issue (wg complexity → model), worker implementuje,
+  testuje, commituje.

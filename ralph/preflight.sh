@@ -19,7 +19,7 @@ SCRIPT_DIR="$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")" && pwd)"
 . "$SCRIPT_DIR/lib.sh"
 
 runtime=claude
-contract_file="$(ralph_contract_file "$runtime")"
+contract_file="$(ralph_contract_file)"
 
 halt() {
   ralph_say warn "✋ $1" >&2

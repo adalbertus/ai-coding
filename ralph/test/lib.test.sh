@@ -77,8 +77,7 @@ expect_ok "no flag -> no forced model (reset between calls)" ralph_parse_args ra
 expect_eq "  forced model empty" "$RALPH_FORCE_MODEL" ""
 expect_fail "--force-model rejects an unknown model" ralph_parse_args ralph-once --force-model=haiku 224
 
-expect_eq "Claude contract file" "$(ralph_contract_file claude)" "CLAUDE.md"
-expect_eq "Codex contract file (preflight)" "$(ralph_contract_file codex)" "AGENTS.md"
+expect_eq "contract file is CLAUDE.md" "$(ralph_contract_file)" "CLAUDE.md"
 
 tmp_prompt=$(mktemp)
 printf 'Read CLAUDE.md; use /tdd.\n' > "$tmp_prompt"

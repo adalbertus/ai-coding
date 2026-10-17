@@ -129,7 +129,7 @@ fi
 #    waiting for a human to verify it (label `needs-human-test`), stop here and list them —
 #    do NOT pick up new work until they are verified and closed. Inert in repos that do not
 #    use the label (the query comes back empty). What counts as "done" per repo lives in the
-#    `## Ralph` section of the selected runtime's native contract file. Skipped in explicit mode: naming an issue is a
+#    `## Ralph` section of CLAUDE.md. Skipped in explicit mode: naming an issue is a
 #    deliberate override, so the loop-safety gate does not apply.
 if [ -z "$ISSUE_ARG" ]; then
   echo "Ralph: sprawdzam zadania czekające na weryfikację (needs-human-test)..."
@@ -145,7 +145,7 @@ $pending"
 fi
 
 # Strażnik (fail-closed): refuse to run unless this repo declares a usable "## Ralph" section
-# in the selected runtime's native contract file. On halt it prints the reason + how to fix and
+# in CLAUDE.md. On halt it prints the reason + how to fix and
 # exits non-zero, so the refusal code stops the loop (the message is already on screen).
 "$SCRIPT_DIR/preflight.sh" claude
 guard_rc=$?
@@ -155,7 +155,7 @@ guard_rc=$?
 # Optional epic branch (ADR 0012): a `ralph-base-branch: <base>` line in ## Ralph. Absent ->
 # trunk, the loop never switches branches. When set, a dirty tree is refused here already, so
 # no selector tokens are spent on a run that could not switch branches anyway.
-base_branch=$(ralph_contract_section "$(ralph_contract_file claude)" | ralph_base_branch) || exit "$RALPH_EXIT_ERROR"
+base_branch=$(ralph_contract_section "$(ralph_contract_file)" | ralph_base_branch) || exit "$RALPH_EXIT_ERROR"
 if [ -n "$base_branch" ]; then
   ralph_require_clean_tree || exit "$RALPH_EXIT_ERROR"
 fi

@@ -14,12 +14,8 @@ LAST_OUT=""; LAST_RC=0
 
 # run <contract_content|__NOFILE__> <gate_stub_cmd>
 run() {
-  local content="$1" stub="${2:-}" runtime="${3:-claude}" file dir
+  local content="$1" stub="${2:-}" runtime="${3:-claude}" file=CLAUDE.md dir
   dir=$(mktemp -d)
-  case "$runtime" in
-    codex) file="AGENTS.md" ;;
-    *) file="CLAUDE.md" ;;
-  esac
   [ "$content" != "__NOFILE__" ] && printf '%s' "$content" > "$dir/$file"
   LAST_OUT=$(cd "$dir" && RALPH_GATE_CMD="$stub" bash "$PREFLIGHT" "$runtime" 2>&1)
   LAST_RC=$?

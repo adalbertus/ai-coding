@@ -83,11 +83,9 @@ ralph_parse_args() {
   RALPH_FORCE_MODEL="$force"
 }
 
+# The repo file that carries `## Ralph`. Ralph runs only on Claude, so AGENTS.md is never read.
 ralph_contract_file() {
-  case "$1" in
-    codex) echo "AGENTS.md" ;;
-    *) echo "CLAUDE.md" ;;
-  esac
+  echo "CLAUDE.md"
 }
 
 # Extract the "## Ralph" section body from an agent contract file: from the Ralph heading up to

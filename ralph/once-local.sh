@@ -13,7 +13,7 @@ ralph_acquire_lock local || exit 0
 ralph_trap_release_lock
 
 # Strażnik (fail-closed): refuse to run unless this repo declares a usable "## Ralph" section
-# in its selected runtime's native agent contract file. On halt it prints the reason + how to
+# in its CLAUDE.md. On halt it prints the reason + how to
 # fix; `|| exit 0` stops the loop cleanly.
 "$SCRIPT_DIR/preflight.sh" claude || exit 0
 
