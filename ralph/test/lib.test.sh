@@ -51,6 +51,10 @@ expect_ok "ralph-once 224 parses as default Claude explicit issue" ralph_parse_a
 expect_eq "default runtime is claude" "$RALPH_RUNTIME" "claude"
 expect_eq "issue parsed" "$RALPH_ISSUE_ARG" "224"
 
+ralph_parse_args ralph-once 17; expect_eq "launch command: ralph-once 17" "$RALPH_LAUNCH_CMD" "ralph-once 17"
+ralph_parse_args ralph-once claude; expect_eq "launch command: ralph-once without a number" "$RALPH_LAUNCH_CMD" "ralph-once"
+ralph_parse_args ralph-epic claude 42 --force-model=opus; expect_eq "launch command: ralph-epic 42" "$RALPH_LAUNCH_CMD" "ralph-epic 42"
+RALPH_LAUNCH_CMD_OUTER="ralph-epic 42" ralph_parse_args ralph-once 43; expect_eq "launch command: outer ralph-epic wins over the child once" "$RALPH_LAUNCH_CMD" "ralph-epic 42"
 expect_ok "ralph-once claude 224 parses as an explicit issue" ralph_parse_args ralph-once claude 224
 expect_eq "  claude is skipped, issue parsed" "$RALPH_RUNTIME/$RALPH_ISSUE_ARG" "claude/224"
 expect_ok "ralph-once claude parses as selector mode" ralph_parse_args ralph-once claude
@@ -838,10 +842,10 @@ expect_eq "  and is told to continue" "$(tail -1 "$fake_lim/q/argv.2")" "$RALPH_
 expect_eq "  the first call is a fresh run" "$(grep -c -- '--resume' "$fake_lim/q/argv.1")" "0"
 
 expect_eq "worker hits a limit too far away -> stops, ślad left with the caller's context" \
-  "$(limit_case "limit_stream $far > \$FAKE_Q/1.jsonl; RALPH_LIMIT_CONTEXT=\$'issue=12\npre_head=abc\ncomplexity=heavy'" \
+  "$(limit_case "RALPH_LAUNCH_CMD='ralph-once 12'; limit_stream $far > \$FAKE_Q/1.jsonl; RALPH_LIMIT_CONTEXT=\$'issue=12\npre_head=abc\ncomplexity=heavy'" \
      ralph_run_worker_through_limit sonnet high PROMPT issue-12 afk worker)" \
   "limit|1|runtime,phase,session,model,effort,label,resets_at,limit,branch,issue,pre_head,complexity,"
-expect_eq "  the stop message says what to do" "$(grep -c 'uruchom ten sam przebieg ponownie' "$fake_lim/out")" "1"
+expect_eq "  the stop message says what to do" "$(grep -c 'Po resecie wklej: ralph-once 12' "$fake_lim/out")" "1"
 
 trace_setup="ralph_limit_trace_write runtime=claude phase=worker session=$SID model=sonnet effort=high label=issue-12 resets_at=$past limit=five_hour branch=epic/45 issue=12"
 expect_eq "restart from the ślad -> resumes right away, run ends, ślad gone" \

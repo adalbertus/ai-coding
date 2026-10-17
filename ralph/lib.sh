@@ -5,6 +5,9 @@
 RALPH_RUNTIME=""
 RALPH_ISSUE_ARG=""
 RALPH_FORCE_MODEL=""
+# The command to paste after a usage limit: the launcher and number the run was started with.
+# ralph-epic exports RALPH_LAUNCH_CMD_OUTER so the once.sh it runs reports the epic command.
+RALPH_LAUNCH_CMD=""
 RALPH_LOCK_DIR=""
 RALPH_LOCK_OWNED=0
 
@@ -33,6 +36,7 @@ ralph_parse_args() {
   RALPH_RUNTIME=claude
   RALPH_ISSUE_ARG=""
   RALPH_FORCE_MODEL=""
+  RALPH_LAUNCH_CMD=""
 
   # --force-model=<model> may stand anywhere; the positional arguments are what is left.
   local rest=() arg force=""
@@ -81,6 +85,7 @@ ralph_parse_args() {
       ;;
   esac
   RALPH_FORCE_MODEL="$force"
+  RALPH_LAUNCH_CMD="${RALPH_LAUNCH_CMD_OUTER:-${launcher}${RALPH_ISSUE_ARG:+ $RALPH_ISSUE_ARG}}"
 }
 
 # The repo file that carries `## Ralph`. Ralph runs only on Claude, so AGENTS.md is never read.
@@ -228,7 +233,7 @@ ralph_run_model_capture() {
     read -r reset type <<<"$hit"
     waits=$((waits + 1))
     if [ "$waits" -gt "$RALPH_LIMIT_MAX_WAITS" ] || ! ralph_wait_for_reset "$reset" "$type" >&2; then
-      ralph_say warn "⏸ Limit użycia ($type) — reset: $([ "${reset:-0}" -gt 0 ] && ralph_clock "$reset" || echo "nieznana godzina"), za daleko, żeby czekać. Uruchom ponownie po resecie." >&2
+      ralph_say warn "⏸ Limit użycia ($type) — reset: $([ "${reset:-0}" -gt 0 ] && ralph_clock "$reset" || echo "nieznana godzina"), za daleko, żeby czekać. Po resecie wklej: ${RALPH_LAUNCH_CMD:-ralph-once}" >&2
       return "$RALPH_EXIT_USAGE_LIMIT"
     fi
   done
@@ -537,8 +542,8 @@ ralph_limit_stop_message() {
   local when="nieznana godzina"
   [ "${1:-0}" -gt 0 ] 2>/dev/null && when=$(ralph_clock "$1")
   ralph_say warn "⏸ Limit użycia ($2) przerwał run; reset: $when — nie czekam na niego w tym procesie.
-Ślad zapisany ($(ralph_limit_trace_path)). Po resecie uruchom ten sam przebieg ponownie: Ralph wznowi
-przerwaną sesję, a niezacommitowane zmiany w drzewie są wtedy w porządku."
+Ślad zapisany ($(ralph_limit_trace_path)). Po resecie wklej: ${RALPH_LAUNCH_CMD:-ralph-once}
+Ralph wznowi przerwaną sesję, a niezacommitowane zmiany w drzewie są wtedy w porządku."
 }
 
 # Runs a worker (as ralph_run_worker) and carries the run over a usage limit (ADR 0017): on

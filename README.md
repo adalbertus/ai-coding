@@ -415,7 +415,7 @@ powiadomień).
 | nic do zrobienia (2) | lista otwartych sub-issues (HITL oznaczone) | odblokuj je, dodaj decyzję lub `ready-for-agent`, uruchom ponownie |
 | błąd lub odmowa (1) | przyczyna z komunikatów `ralph-once` | naprawiasz (brudne drzewo, konflikt scalania, lock, strażnik) i uruchamiasz ponownie |
 | limit iteracji (2) | liczba iteracji i lista otwartych | sprawdzasz, czemu epic nie schodzi, i uruchamiasz ponownie |
-| limit użycia (8) | issue i godzina resetu (pomarańczowe) | po resecie uruchamiasz `ralph-epic <nr>` ponownie — wznowi przerwaną sesję; limit z resetem w ciągu 6 h pętla przeczekuje sama |
+| limit użycia (8) | issue, godzina resetu i komenda do wklejenia (ta, którą uruchomiono przebieg, np. `ralph-epic 42`) | po resecie wklejasz tę komendę — wznowi przerwaną sesję; limit z resetem w ciągu 6 h pętla przeczekuje sama |
 
 Sesja HITL rozwiązana (issue domknięte albo z przywróconym `ready-for-agent`) i odkryty HITL
 (kod 4) nie zatrzymują pętli — idzie następna iteracja. Limit iteracji to dwukrotność liczby

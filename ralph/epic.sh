@@ -16,6 +16,7 @@ SCRIPT_DIR="$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")" && pwd)"
 ralph_parse_args ralph-epic "$@" || exit "$RALPH_EXIT_ERROR"
 ralph_start_run_log "epic${RALPH_ISSUE_ARG:+-$RALPH_ISSUE_ARG}" "$@"
 epic="$RALPH_ISSUE_ARG"
+export RALPH_LAUNCH_CMD_OUTER="$RALPH_LAUNCH_CMD"
 once_cmd="${RALPH_ONCE_CMD:-$SCRIPT_DIR/once.sh}"
 
 # Print a stop message, coloured by the exit code (green ready, red failure, orange anything
@@ -101,7 +102,7 @@ $(open_list)" ;;
 "once.sh zakończył się błędem lub odmową (kod ${code}) przy epicu #${epic}${issue:+, issue #${issue}}. Przyczyna jest w komunikatach powyżej." ;;
     stop-usage-limit)
       finish "$RALPH_EXIT_USAGE_LIMIT" "Ralph: limit użycia" \
-"Limit użycia przerwał pracę nad epicem #${epic}${issue:+ (issue #${issue})}, a reset jest za daleko, żeby czekać. Po resecie uruchom ralph-epic ${epic} ponownie — Ralph wznowi przerwaną sesję ze śladu." ;;
+"Limit użycia przerwał pracę nad epicem #${epic}${issue:+ (issue #${issue})}, a reset jest za daleko, żeby czekać. Po resecie wklej: ${RALPH_LAUNCH_CMD} — Ralph wznowi przerwaną sesję ze śladu." ;;
     stop-limit)
       finish "$RALPH_EXIT_NOTHING" "Ralph: limit iteracji" \
 "Limit iteracji (${limit}) wyczerpany, a epic #${epic} nie jest gotowy do odbioru. Otwarte sub-issues:
