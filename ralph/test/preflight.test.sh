@@ -137,6 +137,48 @@ expect "pusta komenda ralph-gate: -> halt" 1 "ralph-gate:"
 run $'## Ralph\n\nFeedback: `composer test`.\n\n## Inne\nralph-gate: composer test\n' "echo READY"
 expect "ralph-gate: poza sekcją -> halt" 1 "ralph-gate:"
 
+# 14. Pamięć werdyktu (skrót sekcji w katalogu gita). Stub zlicza wywołania modelu.
+# runmem <content> <stub> — uruchamia w tym samym repo $MEMDIR (git init), bez czyszczenia.
+MEMDIR=$(mktemp -d); git -C "$MEMDIR" init -q
+calls="$MEMDIR.calls"; : > "$calls"
+count_stub="$MEMDIR.ready.sh"; miss_stub="$MEMDIR.missing.sh"
+printf '#!/bin/sh\necho x >> %s\necho READY\n' "$calls" > "$count_stub"
+printf '#!/bin/sh\necho x >> %s\necho MISSING\n' "$calls" > "$miss_stub"
+chmod +x "$count_stub" "$miss_stub"
+runmem() {
+  printf '%s' "$1" > "$MEMDIR/CLAUDE.md"
+  LAST_OUT=$(cd "$MEMDIR" && RALPH_GATE_CMD="$2" bash "$PREFLIGHT" 2>&1); LAST_RC=$?
+}
+ncalls() { wc -l < "$calls" | tr -d ' '; }
+
+runmem "$RALPH_SECTION" "$count_stub"
+runmem "$RALPH_SECTION" "$count_stub"
+expect "drugi run bez zmiany sekcji -> exit 0, werdykt z pamięci" 0 "z pamięci"
+[ "$(ncalls)" = 1 ] && { echo "✓ drugi run nie wywołuje modelu"; pass=$((pass+1)); } \
+  || { echo "✗ model wywołany $(ncalls)x zamiast 1x"; fail=$((fail+1)); }
+
+runmem "${RALPH_SECTION}x" "$count_stub"
+[ "$(ncalls)" = 2 ] && { echo "✓ zmiana znaku w sekcji -> ponowna ocena modelem"; pass=$((pass+1)); } \
+  || { echo "✗ zmiana sekcji nie wywołała modelu (wywołań: $(ncalls))"; fail=$((fail+1)); }
+
+runmem "$RALPH_SECTION" "$count_stub"
+runmem $'## Ralph\n\nFeedback: `composer test`.\n' "$count_stub"
+expect "usunięcie ralph-gate: mimo pamięci -> halt" 1 "ralph-gate:"
+
+[ -z "$(git -C "$MEMDIR" status --porcelain --ignored | grep -v CLAUDE.md)" ] \
+  && { echo "✓ pamięć nie brudzi drzewa roboczego"; pass=$((pass+1)); } \
+  || { echo "✗ pamięć brudzi drzewo"; fail=$((fail+1)); }
+rm -rf "$MEMDIR"
+
+# Negatywny werdykt nie jest zapamiętywany.
+MEMDIR=$(mktemp -d); git -C "$MEMDIR" init -q; : > "$calls"
+runmem "$RALPH_SECTION" "$miss_stub"
+runmem "$RALPH_SECTION" "$miss_stub"
+expect "negatywny werdykt -> halt" 1 "niekompletn"
+[ "$(ncalls)" = 2 ] && { echo "✓ negatywny werdykt niezapamiętany: model pytany znowu"; pass=$((pass+1)); } \
+  || { echo "✗ negatywny werdykt zapamiętany (wywołań: $(ncalls))"; fail=$((fail+1)); }
+rm -rf "$MEMDIR" "$calls" "$count_stub" "$miss_stub"
+
 echo
 echo "Wynik: $pass OK, $fail FAIL"
 [ "$fail" = 0 ]

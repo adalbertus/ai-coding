@@ -55,6 +55,18 @@ lub to placeholder — wypisz dokładnie MISSING. Wypisz tylko jedno słowo.
 --- sekcja ## Ralph ---
 $section"
 
+# Positive verdicts are remembered by section hash in the worktree's git dir (not tracked, so the
+# tree stays clean). A changed section = new hash = the model judges again. Outside git: no memory.
+section_hash=$(printf '%s' "$section" | { shasum -a 256 2>/dev/null || sha256sum; } | cut -d' ' -f1)
+memo=""
+if git_dir=$(git rev-parse --absolute-git-dir 2>/dev/null); then
+  memo="$git_dir/ralph-guard-verdict"
+fi
+if [ -n "$memo" ] && [ -n "$section_hash" ] && [ "$(cat "$memo" 2>/dev/null)" = "$section_hash" ]; then
+  echo "Strażnik: sekcja ## Ralph bez zmian — werdykt READY z pamięci." >&2
+  exit 0
+fi
+
 gate_rc=0
 if [ -n "${RALPH_GATE_CMD:-}" ]; then
   verdict=$($RALPH_GATE_CMD 2>/dev/null); gate_rc=$?
@@ -81,5 +93,7 @@ fi
 
 verdict=$(printf '%s' "$verdict" | grep -Eo 'READY|MISSING' | head -1)
 [ "$verdict" = "READY" ] || halt "Strażnik ocenił sekcję \"## Ralph\" jako niekompletną."
+
+[ -n "$memo" ] && [ -n "$section_hash" ] && printf '%s\n' "$section_hash" > "$memo"
 
 exit 0
