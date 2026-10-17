@@ -26,7 +26,12 @@ args="$*"
 case "$args" in
   *"--label needs-human-test"*) cat "$FAKE_DIR/pending" 2>/dev/null ;;
   "issue list --state open"*) cat "$FAKE_DIR/epics" 2>/dev/null ;;
-  "api --paginate repos/{owner}/{repo}/issues/"*"/sub_issues") cat "$FAKE_DIR/subs.json" 2>/dev/null ;;
+  "api --paginate repos/{owner}/{repo}/issues?state="*)
+    f="$FAKE_DIR/all-issues.json"; [ -f "$f" ] || exit 1
+    case "$args" in *state=open*) jq 'map(select(.state == "open"))' "$f" ;; *) cat "$f" ;; esac ;;
+  "api --paginate repos/{owner}/{repo}/issues/"*"/sub_issues")
+    n="${args#*issues/}"; n="${n%%/*}"
+    cat "$FAKE_DIR/subs-$n.json" 2>/dev/null || cat "$FAKE_DIR/subs.json" 2>/dev/null ;;
   "api --paginate repos/{owner}/{repo}/issues/13/dependencies/blocked_by") echo '[{"number":12,"state":"open"}]' ;;
   "api --paginate repos/{owner}/{repo}/issues/"*"/dependencies/blocked_by") echo '[]' ;;
   "issue view"*"--json labels"*) [ -f "$FAKE_DIR/ready" ] && echo true || echo false ;;
@@ -185,6 +190,33 @@ expect_eq "  screen keeps colour (green ready)" "$r" "yes"
 expect_eq "  once.sh inherits the log (so it opens none of its own)" \
   "$(grep -c "^runlog:.git/ralph-logs/$logs\$" "$FAKE/once-args")" "2"
 rm -rf "$LOGREPO"
+
+# ralph-lista: epics (needs-human-test first), open sub-issues, loose issues; no model, only gh + jq.
+LISTA="$SCRIPT_DIR/../lista.sh"
+lista() { LAST_OUT=$(FAKE_DIR="$FAKE" PATH="$FAKE/bin:$PATH" bash "$LISTA" "$@" 2>&1); LAST_RC=$?; }
+cat > "$FAKE/all-issues.json" <<'JSON'
+[{"number":5,"title":"[PRD] Stary","state":"closed","labels":[]},
+ {"number":10,"title":"[PRD] Pierwszy","state":"open","labels":[]},
+ {"number":12,"title":"[ISSUE] Afk","state":"open","labels":[]},
+ {"number":20,"title":"[PRD] Do odbioru","state":"open","labels":[{"name":"needs-human-test"}]},
+ {"number":30,"title":"[PRD] Pusty","state":"open","labels":[]},
+ {"number":50,"title":"Luźne","state":"open","labels":[]},
+ {"number":60,"title":"Pull request","state":"open","labels":[],"pull_request":{}}]
+JSON
+printf '%s' "$SUBS" > "$FAKE/subs.json"
+echo '[{"number":21,"title":"Zrobione","state":"closed","labels":[]},{"number":22,"title":"Afk","state":"open","labels":[{"name":"ready-for-agent"}]}]' > "$FAKE/subs-20.json"
+echo '[]' > "$FAKE/subs-30.json"
+lista
+expect "lista: epic awaiting acceptance first, with counter and marker" 0 "#20 [PRD] Do odbioru   (1/2 zamknięte)  → czeka na odbiór"
+expect "  open sub-issue without ready-for-agent needs a human" 0 "  #13 Decyzja  ⚠ wymaga człowieka"
+expect "  epic without sub-issues" 0 "  (brak sub-issues)"
+expect_eq "  closed epic hidden by default, order is 20, 10, 30" "$(grep -o '^#[0-9]*' <<<"$LAST_OUT" | tr '\n' ' ')" "#20 #10 #30 "
+expect_eq "  loose section holds only #50 (no PR, no sub-issue, no epic)" "$(sed -n '/^Bez epica:/,$p' <<<"$LAST_OUT" | tr '\n' '|')" "Bez epica:|  #50 Luźne|"
+lista --all
+expect "lista --all: closed epics too" 0 "#5 [PRD] Stary"
+rm -f "$FAKE/all-issues.json"
+lista
+expect "lista: gh failure -> Polish error, non-zero" 1 "nie udało się pobrać danych"
 
 # Argument errors.
 run $'0' foo

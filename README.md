@@ -30,7 +30,7 @@ i **idempotentny** (ponowne uruchomienie nie psuje poprawnych symlinków). Tworz
 
 - skille Claude → `~/.claude/skills`: `ralph-konfiguracja`, `to-issues-ralph`
 - skille Codex → `${CODEX_HOME:-~/.codex}/skills`: te same nazwy, wołane w Codexie jako `$...`
-- launchery → `~/.local/bin`: `ralph-once`, `ralph-once-local`, `ralph-epic`
+- launchery → `~/.local/bin`: `ralph-once`, `ralph-once-local`, `ralph-epic`, `ralph-lista`
 
 Repo-local plugin Codex (`.agents/plugins/marketplace.json` + `.agents/plugins/plugins/ai-coding`)
 jest częścią repo, instalator go nie tworzy — tylko wypisuje dwie komendy `codex plugin`, którymi
@@ -181,7 +181,12 @@ ralph-once 12           # 12 to epic ([PRD]) → pierwsze wolne z jego otwartych
 ralph-once              # selektor + worker
 ralph-once-local        # lokalne issues/*.md
 ralph-once 224 --force-model=opus  # Opus z effort high zamiast modelu z complexity:*
+ralph-lista             # epiki i otwarte sub-issues bieżącego repo; --all dodaje zamknięte epiki
 ```
+
+`ralph-lista` to przegląd po przerwie, bez modelu (tylko `gh` + `jq`): epiki czekające na odbiór
+(`needs-human-test`) idą pierwsze, przy sub-issues bez `ready-for-agent` stoi `⚠ wymaga człowieka`,
+a na końcu sekcja `Bez epica:` z otwartymi issues spoza epików.
 
 Dwa flavoury, jeden zestaw promptów:
 
