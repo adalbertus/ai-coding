@@ -794,14 +794,23 @@ expect_eq "gate failure markers and przegląd markers are counted apart" "$(gate
 
 # ralph_verify_closed end to end in a throwaway repo whose CLAUDE.md declares the gate; gh and
 # the heavy review are stubs. $1: gate command (empty = section without the line), $2: earlier
-# gate failures on the issue, $3: issue state, $4: mode, $5: complexity, $6: earlier przegląd
-# failures. Prints "<RALPH_GATE_EXIT or none>|<review run?>|<gh calls>|<marker>"; the gate's own
-# runs are appended to $GATE_RAN, the full gh arguments land in $GATE_FULL.
+# gate failures on the issue ("keep" = the comments the previous call left: a second run on the
+# same GitHub state), $3: issue state, $4: mode, $5: complexity, $6: earlier przegląd failures.
+# Prints "<RALPH_GATE_EXIT or none>|<review run?>|<gh calls>|<marker>"; the gate's own runs are
+# appended to $GATE_RAN, the full gh arguments land in $GATE_FULL. The stub keeps comments like
+# GitHub: `gh issue comment` appends to $GATE_COMMENTS, `gh api .../comments` lists them — so a
+# count taken after the run's own comment would see it.
 export GATE_RAN; GATE_RAN=$(mktemp)
 GATE_FULL=$(mktemp)
+GATE_COMMENTS=$(mktemp)
 gate_case() {
-  local g_cmd="$1" g_prior="$2" g_state="${3:-closed}" g_mode="${4:-afk}" g_cx="${5:-normal}" g_review_prior="${6:-0}"
+  local g_cmd="$1" g_prior="$2" g_state="${3:-closed}" g_mode="${4:-afk}" g_cx="${5:-normal}" g_review_prior="${6:-0}" i
   : > "$GATE_RAN"; : > "$GATE_FULL"
+  if [ "$g_prior" != keep ]; then
+    : > "$GATE_COMMENTS"
+    for ((i = 0; i < g_prior; i++)); do jq -c -n --arg b "$RALPH_GATE_FAIL_MARKER"$'\nold' '{body: $b}' >> "$GATE_COMMENTS"; done
+    for ((i = 0; i < g_review_prior; i++)); do jq -c -n --arg b "$RALPH_REVIEW_FAIL_MARKER"$'\nold' '{body: $b}' >> "$GATE_COMMENTS"; done
+  fi
   (
     repo=$(mktemp -d); cd "$repo" && git init -q
     if [ -n "$g_cmd" ]; then printf '# T\n\n## Ralph\n\nralph-gate: %s\n' "$g_cmd" > CLAUDE.md
@@ -809,10 +818,17 @@ gate_case() {
     gh_calls=$(mktemp); reviewed=no
     gh() {
       if [ "$1 $2" = "issue view" ]; then echo "$g_state"
-      elif [ "$1" = api ]; then
-        jq -c -n --arg g "$RALPH_GATE_FAIL_MARKER" --arg r "$RALPH_REVIEW_FAIL_MARKER" --argjson gp "$g_prior" --argjson rp "$g_review_prior" \
-          '[range($gp) | {body: ($g + "\nold")}] + [range($rp) | {body: ($r + "\nold")}]'
-      else echo "$1 $2 $3" >> "$gh_calls"; printf '%s\n' "$*" >> "$GATE_FULL"; fi
+      elif [ "$1" = api ]; then jq -s -c . "$GATE_COMMENTS"
+      else
+        echo "$1 $2 $3" >> "$gh_calls"; printf '%s\n' "$*" >> "$GATE_FULL"
+        case "$1 $2" in
+          "issue reopen") g_state=open ;;
+          "issue comment")
+            local body=""
+            while [ $# -gt 0 ]; do if [ "$1" = --body ]; then body="${2:-}"; fi; shift; done
+            jq -c -n --arg b "$body" '{body: $b}' >> "$GATE_COMMENTS" ;;
+        esac
+      fi
     }
     ralph_heavy_review() { reviewed=yes; }
     ralph_verify_closed 12 "$g_mode" "$g_cx" abc123 "## Issue #12: t" >/dev/null
@@ -826,7 +842,7 @@ ran() { grep -c ran "$GATE_RAN" | tr -d ' '; }
 
 expect_eq "gate: AFK closes a plain issue, gate green -> nothing changes, gate ran once" \
   "$(gate_case 'echo ran >> "$GATE_RAN"' 0)|$(ran)" "none|no||1"
-expect_eq "gate: red -> reopen + label + marked comment, retry code (7), epic not marked" \
+expect_eq "gate: red -> reopen + label + marked comment, retry code (7)" \
   "$(gate_case 'echo ran >> "$GATE_RAN"; exit 1' 0)" "7|no|issue reopen 12;issue edit 12;issue comment 12;|marker"
 expect_eq "gate: red label is ready-for-agent" "$(grep -c 'issue edit 12 --add-label ready-for-agent' "$GATE_FULL")" "1"
 expect_eq "gate: second red on the same issue -> reopen, AFK-failed code (3)" \
@@ -858,7 +874,79 @@ expect_eq "gate: red comment carries the output tail and the log path" \
 gate_case 'seq 1 200000; exit 1' 0 >/dev/null
 expect_eq "gate: very long output -> the comment fits GitHub's limit and ends with the last line" \
   "$([ "$(wc -c < "$GATE_FULL")" -lt 60000 ] && grep -c '^200000$' "$GATE_FULL")" "1"
-rm -f "$GATE_RAN" "$GATE_FULL"
+# The count is taken before the run's own comment: the first red sees no marker (7), and the next
+# one, on the GitHub state the first left behind, sees exactly one (3).
+expect_eq "gate: first red -> 7, the next red on the state it left behind -> 3" \
+  "$(gate_case 'exit 1' 0 | cut -d'|' -f1)|$(gate_case 'exit 1' keep | cut -d'|' -f1)|$(gate_case 'exit 1' keep | cut -d'|' -f1)" "7|3|3"
+expect_eq "gate: the first red's comment is on the issue, so a green run afterwards stays green" \
+  "$(gate_case 'exit 1' 0 >/dev/null; gate_case 'true' keep | cut -d'|' -f1)" "none"
+rm -f "$GATE_RAN" "$GATE_FULL" "$GATE_COMMENTS"
+
+# The sequence once.sh runs after the worker (ralph_after_worker): bramka -> przegląd heavy ->
+# marking epics -> verdict. Issue 12 is the only sub-issue of epic 45. gh is a stub with state:
+# reopen reopens, issue edit/comment are recorded; every call that matters lands in $SEQ_CALLS
+# in order (gate, review, reopen, ready, comment, label-epic, comment-epic, worker).
+seq_gh() {
+  case "$*" in
+    "issue view 12 --json state"*) echo "$st12" ;;
+    "issue view 12 --json labels"*) echo "$ready12" ;;
+    "issue view 45 --json labels"*) echo false ;;
+    "issue list --state open"*) echo 45 ;;
+    "api --paginate repos/{owner}/{repo}/issues/45/sub_issues") printf '[{"number":12,"state":"%s"}]\n' "$st12" ;;
+    "api --paginate repos/{owner}/{repo}/issues/12/comments") jq -s -c . "$SEQ_COMMENTS" ;;
+    "issue reopen 12") st12=open; echo reopen >> "$SEQ_CALLS" ;;
+    "issue edit 12 --add-label ready-for-agent") ready12=true; echo ready >> "$SEQ_CALLS" ;;
+    "issue edit 45 --add-label needs-human-test") echo label-epic >> "$SEQ_CALLS" ;;
+    "issue comment 45 "*) echo comment-epic >> "$SEQ_CALLS" ;;
+    "issue comment 12 --body "*)
+      echo comment >> "$SEQ_CALLS"
+      jq -c -n --arg b "${*#issue comment 12 --body }" '{body: $b}' >> "$SEQ_COMMENTS" ;;
+  esac
+}
+# $1: gate command (empty = section without the line); the command records itself as "gate".
+seq_repo() {
+  repo=$(mktemp -d); cd "$repo" && git init -q
+  if [ -n "$1" ]; then printf '# T\n\n## Ralph\n\nralph-gate: %s\n' "$1" > CLAUDE.md
+  else printf '# T\n\n## Ralph\n\nbez linii bramki\n' > CLAUDE.md; fi
+  export SEQ_CALLS SEQ_COMMENTS; SEQ_CALLS=$(mktemp); SEQ_COMMENTS=$(mktemp)
+  gh() { seq_gh "$@"; }
+}
+GATE_OK='echo gate >> "$SEQ_CALLS"'
+GATE_RED='echo gate >> "$SEQ_CALLS"; exit 1'
+# $1: gate command, $2: complexity, $3: review stub (ok|fail), $4: earlier red bramki.
+# Prints "<exit code>|<calls>".
+after_worker_case() {
+  local a_cmd="$1" a_cx="${2:-normal}" a_review="${3:-ok}" a_prior="${4:-0}" i rc
+  (
+    seq_repo "$a_cmd"
+    st12=closed; ready12=false
+    for ((i = 0; i < a_prior; i++)); do jq -c -n --arg b "$RALPH_GATE_FAIL_MARKER" '{body: $b}' >> "$SEQ_COMMENTS"; done
+    ralph_heavy_review() {
+      echo review >> "$SEQ_CALLS"
+      if [ "$a_review" = fail ]; then st12=open; RALPH_REVIEW_EXIT=$RALPH_EXIT_REVIEW_RETRY; fi
+    }
+    ( ralph_after_worker 12 afk "$a_cx" abc123 "## Issue #12: t" ) >/dev/null 2>&1
+    rc=$?
+    printf '%s|%s' "$rc" "$(paste -sd, "$SEQ_CALLS")"
+    rm -rf "$repo" "$SEQ_CALLS" "$SEQ_COMMENTS"
+  )
+}
+expect_eq "after worker: last sub-issue closed, gate green -> exit 0, epic marked after the gate" \
+  "$(after_worker_case "$GATE_OK")" "0|gate,label-epic,comment-epic"
+expect_eq "after worker: last sub-issue closed, gate red -> exit 7, issue reopened, epic NOT marked" \
+  "$(after_worker_case "$GATE_RED")" "7|gate,reopen,ready,comment"
+expect_eq "after worker: second red on the same issue -> exit 3, epic NOT marked" \
+  "$(after_worker_case "$GATE_RED" normal ok 1)" "3|gate,reopen,ready,comment"
+expect_eq "after worker: no ralph-gate: line -> exit 1, no gate, epic NOT marked" \
+  "$(after_worker_case '')" "1|"
+expect_eq "after worker: no ralph-gate: line on a heavy issue -> exit 1, no review, epic NOT marked" \
+  "$(after_worker_case '' heavy)" "1|"
+expect_eq "after worker: heavy, gate red -> no przegląd, exit 7, epic NOT marked" \
+  "$(after_worker_case "$GATE_RED" heavy)" "7|gate,reopen,ready,comment"
+expect_eq "after worker: heavy, gate green, przegląd OK -> gate, then przegląd, then the epic" \
+  "$(after_worker_case "$GATE_OK" heavy)" "0|gate,review,label-epic,comment-epic"
+expect_eq "after worker: heavy, gate green, przegląd FAIL -> exit 7, epic NOT marked" \
+  "$(after_worker_case "$GATE_OK" heavy fail)" "7|gate,review"
 
 # --- Limit użycia (ADR 0017) ---
 LIMIT_FIXTURE="$SCRIPT_DIR/fixtures/usage-limit.jsonl"
@@ -990,6 +1078,50 @@ expect_eq "stale ślad (issue closed meanwhile): not applied, removed" "$(applie
 expect_eq "  with the reason" "$(grep -c 'Usuwam nieaktualny ślad limitu użycia (issue #12): issue jest już zamknięte' "$fake_lim/out")" "1"
 expect_eq "stale ślad (another branch): not applied, removed" "$(applies_case open true 45 dev)" "none|0|brak"
 expect_eq "GitHub does not answer: not applied, left alone" "$(applies_case '' '' 45 | cut -d'|' -f1,3)" "none|runtime,phase,session,model,effort,label,resets_at,limit,branch,issue,"
+
+# Wznowienie po limicie (ADR 0017) through ralph_resume_from_trace, with the ślad written for real
+# and the worker / przegląd stubbed. $1: phase, $2: gate command, $3: complexity recorded in the
+# ślad, $4: przegląd stub (ok|fail). Prints "<exit code>|<calls>": worker:<session>,
+# review:<session>, gate, ...
+resume_seq_case() {
+  local r_phase="$1" r_cmd="$2" r_cx="${3:-normal}" r_review="${4:-ok}" rc
+  (
+    seq_repo "$r_cmd"
+    git checkout -q -b epic/45
+    if [ "$r_phase" = review ]; then st12=closed; ready12=false; else st12=open; ready12=true; fi
+    ralph_limit_trace_write runtime=claude phase="$r_phase" session=$SID model=sonnet effort=high label=issue-12 \
+      resets_at=$past limit=five_hour branch=epic/45 issue=12 pre_head=abc123 complexity="$r_cx"
+    ralph_run_worker_through_limit() { echo "worker:${7:-}" >> "$SEQ_CALLS"; st12=closed; ready12=false; }
+    ralph_heavy_review() {
+      echo "review:${4:-}" >> "$SEQ_CALLS"
+      if [ "$r_review" = fail ]; then st12=open; RALPH_REVIEW_EXIT=$RALPH_EXIT_REVIEW_RETRY; fi
+    }
+    ( ralph_resume_from_trace '' ) >/dev/null 2>&1
+    rc=$?
+    printf '%s|%s' "$rc" "$(paste -sd, "$SEQ_CALLS")"
+    rm -rf "$repo" "$SEQ_CALLS" "$SEQ_COMMENTS"
+  )
+}
+expect_eq "resume: worker phase, the worker closes the issue, gate green -> gate runs once, epic marked" \
+  "$(resume_seq_case worker "$GATE_OK")" "0|worker:$SID,gate,label-epic,comment-epic"
+expect_eq "resume: worker phase, gate red -> issue reopened, no przegląd, epic NOT marked" \
+  "$(resume_seq_case worker "$GATE_RED" heavy)" "7|worker:$SID,gate,reopen,ready,comment"
+expect_eq "resume: worker phase, heavy, gate green -> przegląd follows the gate" \
+  "$(resume_seq_case worker "$GATE_OK" heavy)" "0|worker:$SID,gate,review:,label-epic,comment-epic"
+expect_eq "resume: worker phase, no ralph-gate: line -> exit 1, epic NOT marked" \
+  "$(resume_seq_case worker '')" "1|worker:$SID"
+expect_eq "resume: przegląd phase -> przegląd is not skipped, resumes the ślad's session, gate not rerun" \
+  "$(resume_seq_case review "$GATE_RED" heavy)" "0|review:$SID,label-epic,comment-epic"
+expect_eq "resume: przegląd phase, FAIL -> exit 7, epic NOT marked" \
+  "$(resume_seq_case review "$GATE_OK" heavy fail)" "7|review:$SID"
+expect_eq "resume: no ślad -> returns 1 and runs nothing" \
+  "$(
+    seq_repo "$GATE_OK"
+    git checkout -q -b epic/45
+    ralph_run_worker_through_limit() { echo worker >> "$SEQ_CALLS"; }
+    ralph_resume_from_trace ''
+    echo "$?|$(paste -sd, "$SEQ_CALLS")"
+  )" "1|"
 
 # Strażnik / selektor: one-shot calls wait and repeat; the answer is the result text.
 capture_case() {

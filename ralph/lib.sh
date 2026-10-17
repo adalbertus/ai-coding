@@ -1083,6 +1083,92 @@ ralph_mark_ready_epics() {
   done
 }
 
+# --- The end of a ralph-once run: what follows the worker, shared by a fresh run and a resumed one. ---
+
+# A run stopped by a usage limit it could not wait out, or whose runtime would not take the
+# session up: the ślad stays and nothing below may count the issue as done.
+ralph_exit_on_limit_stop() {
+  case "${RALPH_LIMIT_STOP:-}" in
+    limit) exit "$RALPH_EXIT_USAGE_LIMIT" ;;
+    resume-failed) exit "$RALPH_EXIT_ERROR" ;;
+  esac
+}
+
+ralph_issue_text() {
+  gh issue view "$1" --json number,title,body \
+    --jq '"## Issue #\(.number): \(.title)\n\n\(.body)\n"' 2>/dev/null
+}
+
+# Everything after the worker. $1: issue number, $2: mode, $3: complexity, $4: HEAD before the
+# worker, $5: the issue text. Never returns (exits with the run's result).
+ralph_after_worker() {
+  local num="$1" mode="$2" complexity="$3" pre_head="$4" issue="$5" cost
+  ralph_exit_on_limit_stop
+  if [ -n "${RALPH_LAST_LOG:-}" ]; then
+    cost=$(ralph_run_cost "$RALPH_LAST_LOG")
+    [ -n "$cost" ] && ralph_say dim "Koszt workera: $cost"
+  fi
+
+  # The bramka (ADR 0018) and, after a green one, the przegląd heavy (ADR 0016): both before the
+  # epic can be marked for acceptance or anything counts the issue as done.
+  ralph_verify_closed "$num" "$mode" "$complexity" "$pre_head" "$issue"
+  ralph_finish_run "$num" "$mode"
+}
+
+# The run's verdict. $1: issue number, $2: mode. Never returns.
+ralph_finish_run() {
+  local num="$1" mode="$2" state has_label outcome
+  ralph_exit_on_limit_stop
+
+  # The worker may have closed the last sub-issue of an epic: mark it for acceptance. Not when the
+  # bramka could not even run (no gate line): that issue is not verified. Nor after a red bramka
+  # or a failed przegląd: that issue is open again, so its epic still has an open sub-issue.
+  [ "${RALPH_GATE_EXIT:-}" = "$RALPH_EXIT_ERROR" ] || ralph_mark_ready_epics
+
+  # Auto mode denies without prompting, so a run that could not finish (e.g. the commit was
+  # blocked) now ends quietly. Uncommitted leftovers would poison the NEXT run — say it out loud.
+  ralph_warn_dirty_tree
+
+  # The result of the run is the state of the issue afterwards, not the worker's own exit status.
+  state=$(gh issue view "$num" --json state --jq '.state | ascii_downcase' 2>/dev/null)
+  has_label=$(gh issue view "$num" --json labels --jq 'any(.labels[]; .name == "ready-for-agent")' 2>/dev/null)
+  outcome=$(ralph_run_outcome "$mode" "$state" "$has_label")
+  [ -n "${RALPH_REVIEW_EXIT:-}" ] && outcome="$RALPH_REVIEW_EXIT"
+  if [ -n "${RALPH_GATE_EXIT:-}" ]; then
+    # The bramka already said what happened on screen; the generic line would blame a przegląd.
+    outcome="$RALPH_GATE_EXIT"
+  else
+    ralph_outcome_message "$outcome" "$num"
+  fi
+  exit "$outcome"
+}
+
+# Wznowienie po limicie (ADR 0017). $1: the issue/epic argument (may be empty). Returns 1 when no
+# ślad applies (the run goes on as usual); otherwise resumes the interrupted phase and never
+# returns. A resumed worker goes through the bramka like any run; a resumed przegląd heavy does
+# not run it again (the bramka was green before the przegląd began).
+ralph_resume_from_trace() {
+  local num phase session pre_head complexity issue
+  ralph_limit_trace_applies "$1" || return 1
+  num=$(ralph_limit_trace_get issue)
+  phase=$(ralph_limit_trace_get phase)
+  session=$(ralph_limit_trace_get session)
+  pre_head=$(ralph_limit_trace_get pre_head)
+  complexity=$(ralph_limit_trace_get complexity)
+  RALPH_LIMIT_CONTEXT=$(printf 'issue=%s\npre_head=%s\ncomplexity=%s' "$num" "$pre_head" "$complexity")
+  [ -n "${RALPH_ISSUE_FILE:-}" ] && printf '%s\n' "$num" > "$RALPH_ISSUE_FILE"
+  ralph_say warn "Wznowienie po limicie: issue #${num} — $([ "$phase" = review ] && echo "przegląd heavy" || echo worker) przerwany przez limit użycia (sesja $session)."
+  issue=$(ralph_issue_text "$num")
+  if [ "$phase" = review ]; then
+    ralph_heavy_review "$num" "$pre_head" "$issue" "$session"
+    ralph_finish_run "$num" afk
+  fi
+  RALPH_LAST_LOG=""
+  ralph_run_worker_through_limit "$(ralph_limit_trace_get model)" "$(ralph_limit_trace_get effort)" \
+    "" "$(ralph_limit_trace_get label)" afk worker "$session"
+  ralph_after_worker "$num" afk "$complexity" "$pre_head" "$issue"
+}
+
 # --- ralph-epic: run once.sh over an epic until a stop condition (ADR 0013). ---
 
 # Epic structure: one sub_issues call per open epic -> array of {number, started, open:[...]}.

@@ -45,85 +45,9 @@ ISSUE_ARG="$RALPH_ISSUE_ARG"
 ralph_acquire_lock "${ISSUE_ARG:-selector}" || exit "$RALPH_EXIT_ERROR"
 ralph_trap_release_lock
 
-# A run stopped by a usage limit it could not wait out, or whose runtime would not take the
-# session up: the ślad stays and nothing below may count the issue as done.
-exit_on_limit_stop() {
-  case "${RALPH_LIMIT_STOP:-}" in
-    limit) exit "$RALPH_EXIT_USAGE_LIMIT" ;;
-    resume-failed) exit "$RALPH_EXIT_ERROR" ;;
-  esac
-}
-
-# Everything after the worker, shared by a fresh run and one resumed from the ślad. Reads the
-# globals num, mode, complexity, pre_head and issue. Never returns.
-after_worker() {
-  local cost
-  exit_on_limit_stop
-  if [ -n "$RALPH_LAST_LOG" ]; then
-    cost=$(ralph_run_cost "$RALPH_LAST_LOG")
-    [ -n "$cost" ] && ralph_say dim "Koszt workera: $cost"
-  fi
-
-  # The bramka (ADR 0018) and, after a green one, the przegląd heavy (ADR 0016): both before the
-  # epic can be marked for acceptance or anything counts the issue as done.
-  ralph_verify_closed "$num" "$mode" "$complexity" "$pre_head" "$issue"
-  finish_run
-}
-
-# The run's verdict. Never returns.
-finish_run() {
-  local state has_label outcome
-  exit_on_limit_stop
-
-  # The worker may have closed the last sub-issue of an epic: mark it for acceptance. Not when the
-  # bramka could not even run (no gate line): that issue is not verified.
-  [ "${RALPH_GATE_EXIT:-}" = "$RALPH_EXIT_ERROR" ] || ralph_mark_ready_epics
-
-  # Auto mode denies without prompting, so a run that could not finish (e.g. the commit was
-  # blocked) now ends quietly. Uncommitted leftovers would poison the NEXT run — say it out loud.
-  ralph_warn_dirty_tree
-
-  # The result of the run is the state of the issue afterwards, not the worker's own exit status.
-  state=$(gh issue view "$num" --json state --jq '.state | ascii_downcase' 2>/dev/null)
-  has_label=$(gh issue view "$num" --json labels --jq 'any(.labels[]; .name == "ready-for-agent")' 2>/dev/null)
-  outcome=$(ralph_run_outcome "$mode" "$state" "$has_label")
-  [ -n "${RALPH_REVIEW_EXIT:-}" ] && outcome="$RALPH_REVIEW_EXIT"
-  if [ -n "${RALPH_GATE_EXIT:-}" ]; then
-    # The bramka already said what happened on screen; the generic line would blame a przegląd.
-    outcome="$RALPH_GATE_EXIT"
-  else
-    ralph_outcome_message "$outcome" "$num"
-  fi
-  exit "$outcome"
-}
-
-issue_text() {
-  gh issue view "$1" --json number,title,body \
-    --jq '"## Issue #\(.number): \(.title)\n\n\(.body)\n"' 2>/dev/null
-}
-
 # Wznowienie po limicie: a valid ślad is resumed before anything else. Its dirty tree is the
-# interrupted worker's work, on the branch it was working on.
-if ralph_limit_trace_applies "$ISSUE_ARG"; then
-  num=$(ralph_limit_trace_get issue)
-  phase=$(ralph_limit_trace_get phase)
-  session=$(ralph_limit_trace_get session)
-  pre_head=$(ralph_limit_trace_get pre_head)
-  complexity=$(ralph_limit_trace_get complexity)
-  mode=afk
-  RALPH_LIMIT_CONTEXT=$(printf 'issue=%s\npre_head=%s\ncomplexity=%s' "$num" "$pre_head" "$complexity")
-  [ -n "${RALPH_ISSUE_FILE:-}" ] && printf '%s\n' "$num" > "$RALPH_ISSUE_FILE"
-  ralph_say warn "Wznowienie po limicie: issue #${num} — $([ "$phase" = review ] && echo "przegląd heavy" || echo worker) przerwany przez limit użycia (sesja $session)."
-  issue=$(issue_text "$num")
-  if [ "$phase" = review ]; then
-    ralph_heavy_review "$num" "$pre_head" "$issue" "$session"
-    finish_run
-  fi
-  RALPH_LAST_LOG=""
-  ralph_run_worker_through_limit "$(ralph_limit_trace_get model)" "$(ralph_limit_trace_get effort)" \
-    "" "$(ralph_limit_trace_get label)" afk worker "$session"
-  after_worker
-fi
+# interrupted worker's work, on the branch it was working on. Never returns when it resumes.
+ralph_resume_from_trace "$ISSUE_ARG"
 
 # Epics whose sub-issues are all closed get `needs-human-test` from here, not from the worker —
 # so it works whoever closed the last one. Done before the gate so it sees the fresh label.
@@ -307,7 +231,7 @@ if [ -n "$base_branch" ]; then
 fi
 
 # 5. Stage 2 — implement ONLY the selected issue, on the chosen model.
-issue=$(issue_text "$num")
+issue=$(ralph_issue_text "$num")
 # A przegląd heavy that sent the issue back left its notes in a comment; the body does not
 # carry them, so hand the latest ones to the worker explicitly.
 review_notes=$(ralph_review_notes "$num")
@@ -342,4 +266,4 @@ RALPH_LAST_LOG=""
 RALPH_LIMIT_CONTEXT=$(printf 'issue=%s\npre_head=%s\ncomplexity=%s' "$num" "$pre_head" "$complexity")
 ralph_run_worker_through_limit "$model" "$effort" \
   "Previous commits: $commits Issue to work (work ONLY this one): $issue $prompt" "issue-${num}" "$mode" worker
-after_worker
+ralph_after_worker "$num" "$mode" "$complexity" "$pre_head" "$issue"
