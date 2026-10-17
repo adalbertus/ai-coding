@@ -52,17 +52,18 @@ epic number and this line: `/clear`, then `/to-issues-ralph <nr>`.
    > publishing the epic is the end of this run.
 
    Why: the PRD denoises a long grill session into a clean one-page breakdown input and
-   supplies the exhaustive user-story list the breakdown uses as a coverage checklist. The
-   breakdown runs later, in a fresh session, from the epic's body. It lands in the epic because that parent issue exists anyway for odbiór (ADR 0012), so storing
+   supplies the exhaustive user-story list the breakdown uses as a coverage checklist. The PRD
+   lands in the epic because that parent issue exists anyway for odbiór (ADR 0012), so storing
    it costs nothing; `ralph/once.sh` filters `[PRD]` issues out, so the epic is never picked
-   up as work. The epic is published before its sub-issues so they can point at it.
+   up as work. The breakdown runs later, in a fresh session, from the epic's body.
 
-2. **Run the breakdown non-interactively** (only with an epic number). Invoke the `to-issues` skill with this override:
+2. **Run the breakdown non-interactively** (only with an epic number). Invoke the `to-issues`
+   skill with this override:
    > Run `to-issues` **non-interactively** from the PRD in the epic's body (do not look
    > for a file). Do NOT perform its step 4 (Quiz the user) and do NOT
    > wait for approval — treat the breakdown as approved and proceed straight to publishing.
    > This countermands `to-issues`' "Iterate until the user approves." Publish every slice as
-   > a native sub-issue of the epic from step 1: set the parent with
+   > a native sub-issue of epic `<epic number>`: set the parent with
    > `gh issue create --parent <epic number>`. Do NOT add a `## Jak sprawdzić ręcznie`
    > section to any slice — manual acceptance belongs to the epic. After publishing, in
    > the same turn, continue with steps 3–5 of `to-issues-ralph`.
