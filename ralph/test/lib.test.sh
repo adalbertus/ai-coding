@@ -6,6 +6,10 @@ SCRIPT_DIR="$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")" && pwd)"
 # Plain, unclipped output whatever terminal the tests run in; colour and clipping are tested
 # explicitly.
 export RALPH_COLOR=0 RALPH_COLS=0
+# A worker or przegląd running these tests under ralph-epic inherits the run's variables; without
+# this, the tests would write test issue numbers into the real run's issue file, expect fds 3/4
+# that are not open, and render reports under the reviewer's title.
+unset RALPH_ISSUE_FILE RALPH_NOTIFY_HITL RALPH_TERM_FDS RALPH_REPORT_TITLE
 . "$SCRIPT_DIR/../lib.sh"
 
 pass=0; fail=0
@@ -159,8 +163,6 @@ printf '%s\n' "$@" > "$CLAUDE_ARGV_CAPTURE"
 FAKE_CLAUDE
 chmod +x "$fake_hc_dir/bin/claude"
 (
-  # A worker running these tests inherits RALPH_TERM_FDS=1 from its run log, without fds 3/4.
-  unset RALPH_TERM_FDS
   PATH="$fake_hc_dir/bin:$PATH"
   CLAUDE_ARGV_CAPTURE="$fake_hc_dir/worker.argv"
   export CLAUDE_ARGV_CAPTURE
@@ -812,6 +814,8 @@ gate_case() {
     for ((i = 0; i < g_review_prior; i++)); do jq -c -n --arg b "$RALPH_REVIEW_FAIL_MARKER"$'\nold' '{body: $b}' >> "$GATE_COMMENTS"; done
   fi
   (
+    # once.sh runs without pipefail; a gate exit code lost in a pipe must fail here as it would there.
+    set +o pipefail
     repo=$(mktemp -d); cd "$repo" && git init -q
     if [ -n "$g_cmd" ]; then printf '# T\n\n## Ralph\n\nralph-gate: %s\n' "$g_cmd" > CLAUDE.md
     else printf '# T\n\n## Ralph\n\nbez linii bramki\n' > CLAUDE.md; fi
