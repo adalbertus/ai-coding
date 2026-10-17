@@ -272,9 +272,17 @@ once_case() {
   printf '# T\n\n## Ralph\n\nBramka zielona = gotowe.\n\nralph-gate: %s\n' "$gate" > "$repo/CLAUDE.md"
   printf '%s' "$subs" > "$OFAKE/subs.json"; printf '%s' "$label" > "$OFAKE/label"; printf '%s' "$comments" > "$OFAKE/comments.json"
   : > "$OFAKE/calls"
+  if [ -n "${ONCE_EPIC_BRANCH:-}" ]; then
+    # ralph-base-branch: main, checkout on main; epic/50 holds a file main lacks (t/epic).
+    printf 'ralph-base-branch: main\n' >> "$repo/CLAUDE.md"
+    ( cd "$repo" && git add -A && git -c user.email=t@t -c user.name=t commit -q -m base && git branch -M main \
+      && git checkout -q -b epic/50 && mkdir -p t && echo x > t/epic && git add -A \
+      && git -c user.email=t@t -c user.name=t commit -q -m epic && git checkout -q main )
+  fi
   LAST_OUT=$(cd "$repo" && ONCE_CALLS="$OFAKE/calls" OFAKE_DIR="$OFAKE" PATH="$OFAKE/bin:$PATH" RALPH_GATE_CMD="echo READY" \
     bash "$ONCE_SH" "$@" 2>&1)
   LAST_RC=$?
+  LAST_BRANCH=$(git -C "$repo" rev-parse --abbrev-ref HEAD 2>/dev/null)
   rm -rf "$repo"
 }
 calls() { paste -sd, "$OFAKE/calls"; }
@@ -284,6 +292,14 @@ GATE_N='echo gate >> "$ONCE_CALLS"; exit 1'
 once_case "$ALL_CLOSED" false '[]' "$GATE_Y" 50
 expect "ralph-once <epic>, all sub-issues closed, gate green -> exit 9 (do odbioru)" 9 'claude "/odbior 50"'
 expect_eq "  gate, round marker, label, acceptance list" "$(calls)" "gate,comment-epic,label-epic,comment-epic"
+
+# With ralph-base-branch the weryfikacja runs the gate on epic/<nr>, not on the checkout it started
+# from: the gate only passes when t/epic (present on epic/50 alone) exists.
+GATE_FILE='test -f t/epic && echo gate >> "$ONCE_CALLS"'
+ONCE_EPIC_BRANCH=1 once_case "$ALL_CLOSED" false '[]' "$GATE_FILE" 50
+expect "ralph-once <epic> with ralph-base-branch, started on main -> gate sees the epic's code, exit 9" 9 'claude "/odbior 50"'
+expect_eq "  gate, round marker, label, acceptance list" "$(calls)" "gate,comment-epic,label-epic,comment-epic"
+expect_eq "  repo ends on epic/50" "$LAST_BRANCH" "epic/50"
 
 once_case "$ALL_CLOSED" false '[]' "$GATE_N" 50
 expect "ralph-once <epic>, gate red in round 1 -> exit 7, a Poprawka under the epic" 7 "Poprawka"
