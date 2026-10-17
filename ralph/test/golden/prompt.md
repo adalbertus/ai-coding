@@ -20,12 +20,15 @@ The `ready-for-agent` label is the contract for AFK-ready work, but that separat
 convention, not guaranteed — an issue can be mislabelled. So before implementing, verify:
 
 - **Still AFK?** If the issue actually requires a human decision or a human action — an
-  architectural choice, a design review, an ambiguous trade-off the body does not settle, or a
-  destructive/irreversible step — do NOT guess. The issue is HITL, not AFK: remove its
+  architectural choice, a design review, an ambiguous trade-off the body does not settle, a
+  destructive/irreversible step, or an input only a human can supply that is missing (a file,
+  real data, credentials, access) — do NOT guess. The issue is HITL, not AFK: remove its
   `ready-for-agent` label (`gh issue edit <number> --remove-label ready-for-agent`) so the loop
   does not pick it up again, comment exactly what is needed, with your recommendation
   (`gh issue comment <number>`), and output <promise>NO MORE TASKS</promise>. It returns to the
-  loop only when the human restores the label.
+  loop only when the human restores the label. If the issue body has its own stop instruction
+  for this case (e.g. "comment on the epic and stop"), follow it as well — but still remove the
+  label: a stop that leaves `ready-for-agent` on is reported as a failed run.
 
 # EXPLORATION
 
