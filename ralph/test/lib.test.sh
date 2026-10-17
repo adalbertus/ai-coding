@@ -113,7 +113,7 @@ expect_eq "mode: similar label is not ready-for-agent" \
 # Golden files: the prompts as the worker gets them. A deliberate change means regenerating them:
 # UPDATE_GOLDEN=1 bash ralph/test/lib.test.sh
 GOLDEN_DIR="$SCRIPT_DIR/golden"
-for prompt_file in prompt prompt-hitl prompt-local prompt-review; do
+for prompt_file in prompt prompt-hitl prompt-local prompt-review prompt-verify; do
   golden="$GOLDEN_DIR/$prompt_file.md"
   rendered=$(ralph_render_prompt "$SCRIPT_DIR/../$prompt_file.md")
   if [ -n "${UPDATE_GOLDEN:-}" ]; then
@@ -690,6 +690,73 @@ expect_eq "verify decision: green in round 2 -> accept" "$(ralph_verify_decision
 expect_eq "verify decision: red in round 1 -> fix" "$(ralph_verify_decision 1 1)" "fix"
 expect_eq "verify decision: red in round 2 -> accept-red (no new Poprawka)" "$(ralph_verify_decision 1 2)" "accept-red"
 expect_eq "verify decision: red in round 3 -> accept-red" "$(ralph_verify_decision 5 3)" "accept-red"
+expect_eq "verify decision: green gate, blocking findings, round 1 -> fix" "$(ralph_verify_decision 0 1 2)" "fix"
+expect_eq "verify decision: green gate, blocking findings, round 2 -> accept-red" "$(ralph_verify_decision 0 2 1)" "accept-red"
+expect_eq "verify decision: green gate, no blocking findings -> accept" "$(ralph_verify_decision 0 2 0)" "accept"
+
+# --- Raport weryfikatora (ADR 0018): parsing, blocking, issue bodies, the list's parts (pure) ---
+R_FENCE='```'
+V_REPORT_EMPTY=$'Nic nie znalazłem.\n\n```json\n{"findings": [], "items": []}\n```'
+mk_reply() { printf 'Podsumowanie dla człowieka.\n\n%sjson\n%s\n%s\n' "$R_FENCE" "$1" "$R_FENCE"; }
+R_BLOCK_N='{"category":"blocking","area":"security","title":"Zamknij wyciek tenantów","rationale":"Orders::show (app/Orders.php:12) nie sprawdza tenanta.","complexity":"normal","acceptance":["GET cudzego zamówienia -> 404"]}'
+R_BLOCK_H='{"category":"blocking","area":"prd","title":"Napraw naliczanie","rationale":"Naliczanie ignoruje rok przestępny.","complexity":"heavy","acceptance":["luty 2028 liczy 29 dni"],"cases":["1 marca 2028 -> 29 dni lutego","1 marca 2027 -> 28 dni lutego"]}'
+R_PROP='{"category":"proposal","area":"ux","title":"Większy przycisk","rationale":"Przycisk Zapisz jest mały."}'
+R_REF='{"category":"refactor","area":"architecture","title":"Wydziel serwis cen","rationale":"Logika cen w trzech kontrolerach."}'
+R_ITEMS='{"kind":"not-proven","text":"Czy mail dochodzi na prawdziwą skrzynkę"},{"kind":"before-after","text":"Ekran listy. Przed: tabela. Po: karty."}'
+R_ALL=$(mk_reply "{\"findings\":[$R_BLOCK_N,$R_BLOCK_H,$R_PROP,$R_REF],\"items\":[$R_ITEMS]}")
+parsed_all=$(ralph_report_parse <<<"$R_ALL")
+expect_eq "report: a valid reply parses; findings by category" \
+  "$(jq -r '[.findings[].category] | join(",")' <<<"$parsed_all")" "blocking,blocking,proposal,refactor"
+expect_eq "report: blocking count" "$(ralph_report_blocking_count "$parsed_all")" "2"
+expect_eq "report: defaults are filled (complexity normal, no cases, no area)" \
+  "$(ralph_report_parse <<<"$(mk_reply '{"findings":[{"category":"proposal","title":"t","rationale":"r"}]}')" | jq -c '.findings[0] | [.complexity, .cases, .area]')" '["normal",[],""]'
+expect_eq "report: no findings is a valid report" "$(ralph_report_parse <<<"$V_REPORT_EMPTY" | jq -c .)" '{"findings":[],"items":[]}'
+expect_eq "report: only the last json block counts" \
+  "$(ralph_report_parse <<<"$(mk_reply '{"findings":[],"items":[]}')"$'\n'"$(mk_reply "{\"findings\":[$R_PROP]}")" | jq -r '.findings[0].title')" "Większy przycisk"
+bad() { ralph_report_parse <<<"$1" >/dev/null 2>&1; echo "rc=$?"; }
+expect_eq "report: no json block -> unreadable" "$(bad 'Wszystko dobrze, nic nie znalazłem.')" "rc=1"
+expect_eq "report: not JSON -> unreadable" "$(bad "$(mk_reply '{nie json')")" "rc=1"
+expect_eq "report: empty block -> unreadable" "$(bad "$(mk_reply '')")" "rc=1"
+expect_eq "report: findings missing -> unreadable" "$(bad "$(mk_reply '{"items":[]}')")" "rc=1"
+expect_eq "report: unknown category -> unreadable" \
+  "$(bad "$(mk_reply '{"findings":[{"category":"opinia","title":"t","rationale":"r"}]}')")" "rc=1"
+expect_eq "report: finding without a rationale -> unreadable" \
+  "$(bad "$(mk_reply '{"findings":[{"category":"proposal","title":"t"}]}')")" "rc=1"
+expect_eq "report: blocking without acceptance criteria -> unreadable" \
+  "$(bad "$(mk_reply '{"findings":[{"category":"blocking","title":"t","rationale":"r","complexity":"normal","acceptance":[]}]}')")" "rc=1"
+expect_eq "report: blocking without a complexity -> unreadable" \
+  "$(bad "$(mk_reply '{"findings":[{"category":"blocking","title":"t","rationale":"r","acceptance":["a"]}]}')")" "rc=1"
+expect_eq "report: blocking with an unknown complexity -> unreadable" \
+  "$(bad "$(mk_reply '{"findings":[{"category":"blocking","title":"t","rationale":"r","complexity":"huge","acceptance":["a"]}]}')")" "rc=1"
+expect_eq "report: heavy without cases -> unreadable" \
+  "$(bad "$(mk_reply '{"findings":[{"category":"blocking","title":"t","rationale":"r","complexity":"heavy","acceptance":["a"]}]}')")" "rc=1"
+expect_eq "report: an item of an unknown kind -> unreadable" \
+  "$(bad "$(mk_reply '{"findings":[],"items":[{"kind":"opinia","text":"x"}]}')")" "rc=1"
+
+body_n=$(ralph_report_issue_body "$(ralph_report_findings "$parsed_all" blocking | head -1)" 45 1)
+expect_eq "fix body: the rationale, the epic and round, criteria as a checklist, no case list for a normal one" \
+  "$(grep -c 'Orders::show' <<<"$body_n")|$(grep -c 'epicu #45, runda 1, obszar: security' <<<"$body_n")|$(grep -c -- '- \[ \] GET cudzego zamówienia -> 404' <<<"$body_n")|$(grep -c 'Przypadki do przetestowania' <<<"$body_n")" "1|1|1|0"
+body_h=$(ralph_report_issue_body "$(ralph_report_findings "$parsed_all" blocking | tail -1)" 45 1)
+expect_eq "fix body (heavy): the case list for the przegląd, one bullet per case" \
+  "$(grep -c '^## Przypadki do przetestowania' <<<"$body_h")|$(grep -c -- '^- 1 marca 2028 -> 29 dni lutego' <<<"$body_h")|$(grep -c -- '^- 1 marca 2027 -> 28 dni lutego' <<<"$body_h")" "1|1|1"
+expect_eq "unresolved: blocking findings as bullets, nothing else" \
+  "$(ralph_report_unresolved "$parsed_all" | grep -c '^- \*\*')|$(ralph_report_unresolved "$parsed_all" | grep -c 'Większy przycisk')" "2|0"
+sections=$(ralph_report_sections "$parsed_all")
+expect_eq "list parts: not-proven, before/after and proposals, in that order; refactors are not there" \
+  "$(grep '^### ' <<<"$sections" | paste -sd, -)|$(grep -c 'Wydziel serwis cen' <<<"$sections")" \
+  "### Czego bramka nie udowadnia,### Przed / po (wygląd zapowiedziany w PRD),### Propozycje do decyzji|0"
+expect_eq "list parts: nothing to say -> nothing" "$(ralph_report_sections "$(ralph_report_parse <<<"$V_REPORT_EMPTY")")" ""
+list_full=$(ralph_acceptance_list 45 "1. Krok" 'cd /w && claude "/odbior 45"' '' '' '' '' "$(ralph_report_unresolved "$parsed_all")" "$sections" v-sess-1)
+expect_eq "acceptance list: unresolved findings first, then the steps, the report's parts, the command" \
+  "$(grep -E '^### ' <<<"$list_full" | paste -sd, -)" \
+  "### Nierozwiązane,### Kroki (## Jak odebrać),### Czego bramka nie udowadnia,### Przed / po (wygląd zapowiedziany w PRD),### Propozycje do decyzji,### Odbiór"
+expect_eq "acceptance list: the weryfikator's session id with the resume command" \
+  "$(grep -c 'claude --resume v-sess-1' <<<"$list_full")" "1"
+list_green=$(ralph_acceptance_list 45 "1. Krok" 'cd /w && claude "/odbior 45"')
+expect_eq "acceptance list: no session -> no resume line" "$(grep -c 'resume' <<<"$list_green")" "0"
+expect_eq "stale ślad: verify, epic open and not handed over -> fits" "$(ralph_limit_trace_stale verify open false epic/45 epic/45)" ""
+expect_eq "stale ślad: verify, epic closed" "$(ralph_limit_trace_stale verify closed false epic/45 epic/45)" "epic jest już zamknięty"
+expect_eq "stale ślad: verify, epic already has needs-human-test" "$(ralph_limit_trace_stale verify open true epic/45 epic/45)" "epic ma już needs-human-test"
 
 expect_eq "steps: the Jak odebrać section of an epic body, without the heading and the next section" \
   "$(printf '## Solution\nx\n\n## Jak odebrać\n\n1. Pierwszy\n2. Drugi\n\n## Inne\nnie to\n' | ralph_epic_acceptance_steps)" $'1. Pierwszy\n2. Drugi'
@@ -700,7 +767,6 @@ wt_dir="$(mktemp -d)/my wt"; mkdir "$wt_dir"
 expect_eq "acceptance command: a worktree path with a space still cd's into it" \
   "$(bash -c "$(ralph_acceptance_command 45 "$wt_dir" | sed 's/ && claude.*//') && pwd")" "$wt_dir"
 rm -rf "${wt_dir%/my wt}"
-list_green=$(ralph_acceptance_list 45 "1. Krok" 'cd /w && claude "/odbior 45"')
 expect_eq "acceptance list: steps and the command, the marker first, no unresolved section" \
   "$(head -1 <<<"$list_green")|$(grep -c '1. Krok' <<<"$list_green")|$(grep -c 'odbior 45' <<<"$list_green")|$(grep -c 'Nierozwiązane' <<<"$list_green")" \
   "$RALPH_ACCEPT_LIST_MARKER|1|1|0"
@@ -1106,11 +1172,32 @@ verify_gh() {
       printf '%s\n----\n' "${*#issue comment 45 --body }" >> "$VERIFY_OUT" ;;
     "issue edit 45 --add-label needs-human-test") [ "$v_fail" = label ] && return 1; echo label >> "$V_CALLS" ;;
     "issue view 45 --json body"*) printf '%s\n' "$VERIFY_BODY" ;;
+    "issue view 45 --json number,title,body"*) printf '## Epic #45: [PRD] Testowy\n\n%s\n' "$VERIFY_BODY" ;;
+    "issue view 45 --json state"*) echo open ;;
+    "issue view 45 --json labels"*) echo false ;;
+    "issue list "*) printf '%s\n' "${V_EXISTING:-}" ;;
     "label create"*) ;;
     "issue create "*)
       [ "$v_fail" = create ] && return 1
-      echo create >> "$V_CALLS"; printf '%s\n' "$*" > "$VERIFY_CREATE" ;;
+      echo create >> "$V_CALLS"; printf '%s\n====\n' "$*" >> "$VERIFY_CREATE" ;;
   esac
+}
+# The weryfikator, stubbed where the real one would run through the usage limit: plays the reply in
+# $V_REPORT_TEXT as a finished run with session v-sess-1 and a cost; records its prompt (arg 3) and
+# the session it was asked to resume (arg 7). V_STOP=limit|resume-failed plays a stopped run.
+V_REPORT_EMPTY=$'Nic nie znalazłem.\n\n```json\n{"findings": [], "items": []}\n```'
+V_REPORT_TEXT="$V_REPORT_EMPTY"
+verify_stub_worker() {
+  echo verifier >> "$V_CALLS"
+  printf '%s\n' "$3" > "$VERIFY_PROMPT"
+  printf '%s\n' "${7:-}" > "$VERIFY_RESUMED"
+  RALPH_LIMIT_STOP="${V_STOP:-}"
+  [ -z "${V_STOP:-}" ] || return 1
+  RALPH_LAST_LOG=$(mktemp)
+  {
+    echo '{"type":"system","subtype":"init","session_id":"v-sess-1"}'
+    jq -c -n --arg r "$V_REPORT_TEXT" '{type:"result",is_error:false,num_turns:4,result:$r,total_cost_usd:1.234,session_id:"v-sess-1"}'
+  } > "$RALPH_LAST_LOG"
 }
 verify_case() {
   local v_cmd="$1" v_prior="${2:-}" v_fail="${3:-none}" line
@@ -1118,27 +1205,32 @@ verify_case() {
     repo=$(mktemp -d); cd "$repo" && git init -q
     if [ -n "$v_cmd" ]; then printf '# T\n\n## Ralph\n\nralph-gate: %s\n' "$v_cmd" > CLAUDE.md
     else printf '# T\n\n## Ralph\n\nbez linii bramki\n' > CLAUDE.md; fi
-    export V_CALLS V_COMMENTS VERIFY_OUT VERIFY_CREATE
+    export V_CALLS V_COMMENTS VERIFY_OUT VERIFY_CREATE VERIFY_PROMPT VERIFY_RESUMED
     V_CALLS=$(mktemp); V_COMMENTS=$(mktemp); VERIFY_OUT=$(mktemp); VERIFY_CREATE=$(mktemp)
+    VERIFY_PROMPT=$(mktemp); VERIFY_RESUMED=$(mktemp)
+    SCRIPT_DIR="$SCRIPT_DIR/.."
     while IFS= read -r line; do
       [ -n "$line" ] && jq -c -n --arg b "$(printf '%b' "$line")" '{body: $b}' >> "$V_COMMENTS"
     done <<<"$v_prior"
     gh() { verify_gh "$@"; }
+    ralph_run_worker_through_limit() { verify_stub_worker "$@"; }
     ralph_verify_epic 45 >"$repo/stdout" 2>&1
     printf '%s|%s' "$RALPH_VERIFY_EXIT" "$(paste -sd, "$V_CALLS")"
     cp "$VERIFY_OUT" /tmp/ralph-verify-out.$$; cp "$VERIFY_CREATE" /tmp/ralph-verify-create.$$; cp "$repo/stdout" /tmp/ralph-verify-stdout.$$
-    rm -rf "$repo" "$V_CALLS" "$V_COMMENTS" "$VERIFY_OUT" "$VERIFY_CREATE"
+    cp "$VERIFY_PROMPT" /tmp/ralph-verify-prompt.$$
+    rm -rf "$repo" "$V_CALLS" "$V_COMMENTS" "$VERIFY_OUT" "$VERIFY_CREATE" "$VERIFY_PROMPT" "$VERIFY_RESUMED"
   )
 }
 V_GATE_OK='echo gate >> "$V_CALLS"; echo "wszystko zielone"'
 V_GATE_RED='echo gate >> "$V_CALLS"; echo "FAIL: test d""ziwny"; exit 3'
 verify_artifacts() { # reads the files verify_case left (named by the subshell's pid) -> sets v_out, v_create, v_stdout
   v_out=$(cat /tmp/ralph-verify-out.* 2>/dev/null); v_create=$(cat /tmp/ralph-verify-create.* 2>/dev/null); v_stdout=$(cat /tmp/ralph-verify-stdout.* 2>/dev/null)
-  rm -f /tmp/ralph-verify-out.* /tmp/ralph-verify-create.* /tmp/ralph-verify-stdout.*
+  v_prompt=$(cat /tmp/ralph-verify-prompt.* 2>/dev/null)
+  rm -f /tmp/ralph-verify-out.* /tmp/ralph-verify-create.* /tmp/ralph-verify-stdout.* /tmp/ralph-verify-prompt.*
 }
 
 expect_eq "verify: gate green, round 1 -> marker, label, acceptance list; exit 9 (do odbioru)" \
-  "$(verify_case "$V_GATE_OK")" "9|gate,marker,label,list"
+  "$(verify_case "$V_GATE_OK")" "9|gate,verifier,marker,label,list"
 verify_artifacts
 expect_eq "  the list holds the Jak odebrać steps, not the rest of the epic body" \
   "$(grep -c '1. Otwórz stronę' <<<"$v_out")|$(grep -c 'Out of Scope' <<<"$v_out")" "1|0"
@@ -1148,7 +1240,7 @@ expect_eq "  the command ends the screen output" "$(tail -1 <<<"$v_stdout" | gre
 expect_eq "  the round marker comment says round 1" "$(grep -c 'runda 1' <<<"$v_out")" "1"
 
 expect_eq "verify: gate red, round 1 -> marker, one Poprawka sub-issue, NO label; exit 7 (ralph-epic goes on)" \
-  "$(verify_case "$V_GATE_RED")" "7|gate,marker,create"
+  "$(verify_case "$V_GATE_RED")" "7|gate,verifier,marker,create"
 verify_artifacts
 expect_eq "  Poprawka: title, ready-for-agent, complexity:normal, parent = the epic" \
   "$(grep -c -e '--title \[ISSUE\] Poprawka: czerwona bramka' <<<"$v_create")|$(grep -c -e '--label ready-for-agent' <<<"$v_create")|$(grep -c -e '--label complexity:normal' <<<"$v_create")|$(grep -c -e '--parent 45' <<<"$v_create")" "1|1|1|1"
@@ -1157,7 +1249,7 @@ expect_eq "  Poprawka: the tail of the output and the log path" \
 expect_eq "  the epic gets no acceptance list" "$(grep -c 'Lista odbioru' <<<"$v_out")" "0"
 
 expect_eq "verify: gate red, round 2 (one earlier round) -> label with the red gate on top of the list; exit 9; no new Poprawka" \
-  "$(verify_case "$V_GATE_RED" "$RALPH_VERIFY_MARKER runda 1")" "9|gate,marker,label,list"
+  "$(verify_case "$V_GATE_RED" "$RALPH_VERIFY_MARKER runda 1")" "9|gate,verifier,marker,label,list"
 verify_artifacts
 expect_eq "  the red gate is listed before the steps" \
   "$(grep -nE 'Nierozwiązane|Kroki' <<<"$v_out" | cut -d: -f2 | paste -sd, -)" "### Nierozwiązane,### Kroki (## Jak odebrać)"
@@ -1165,10 +1257,10 @@ expect_eq "  and names the failing output" "$(grep -c 'FAIL: test dziwny' <<<"$v
 expect_eq "  the round marker comment says round 2" "$(grep -c 'runda 2' <<<"$v_out")" "1"
 
 expect_eq "verify: acceptance marker after two rounds, then a Poprawka -> red again is round 1: Poprawka again, no label" \
-  "$(verify_case "$V_GATE_RED" "$RALPH_VERIFY_MARKER 1\n$RALPH_VERIFY_MARKER 2\n$RALPH_ODBIOR_MARKER\nzamknięta Poprawka")" "7|gate,marker,create"
+  "$(verify_case "$V_GATE_RED" "$RALPH_VERIFY_MARKER 1\n$RALPH_VERIFY_MARKER 2\n$RALPH_ODBIOR_MARKER\nzamknięta Poprawka")" "7|gate,verifier,marker,create"
 verify_artifacts
 expect_eq "verify: gate green after a fresh acceptance marker -> round 1 marker" \
-  "$(verify_case "$V_GATE_OK" "$RALPH_VERIFY_MARKER 1\n$RALPH_VERIFY_MARKER 2\n$RALPH_ODBIOR_MARKER")" "9|gate,marker,label,list"
+  "$(verify_case "$V_GATE_OK" "$RALPH_VERIFY_MARKER 1\n$RALPH_VERIFY_MARKER 2\n$RALPH_ODBIOR_MARKER")" "9|gate,verifier,marker,label,list"
 verify_artifacts
 expect_eq "  and says so" "$(grep -c 'runda 1' <<<"$v_out")" "1"
 
@@ -1178,13 +1270,132 @@ expect_eq "verify: comments unreadable -> error before the gate (the round numbe
   "$(verify_case "$V_GATE_OK" '' comments)" "1|"
 verify_artifacts
 expect_eq "verify: the round marker cannot be written -> error, no label and no Poprawka (it would verify forever)" \
-  "$(verify_case "$V_GATE_RED" '' marker)" "1|gate"
+  "$(verify_case "$V_GATE_RED" '' marker)" "1|gate,verifier"
 verify_artifacts
 expect_eq "verify: green, label cannot be set -> error, no acceptance list" \
-  "$(verify_case "$V_GATE_OK" '' label)" "1|gate,marker"
+  "$(verify_case "$V_GATE_OK" '' label)" "1|gate,verifier,marker"
 verify_artifacts
 expect_eq "verify: red, Poprawka cannot be created -> error" \
-  "$(verify_case "$V_GATE_RED" '' create)" "1|gate,marker"
+  "$(verify_case "$V_GATE_RED" '' create)" "1|gate,verifier,marker"
+verify_artifacts
+
+# --- ralph_verify_epic with the weryfikator's report (stubbed): what lands on GitHub per decision ---
+V_BODY_DEV='Odchylenie: zamiast przycisku OK jest link'
+expect_eq "verify (report): green gate, no findings -> exit 9; the weryfikator ran once, after the gate" \
+  "$(verify_case "$V_GATE_OK")" "9|gate,verifier,marker,label,list"
+verify_artifacts
+expect_eq "  the list names the weryfikator's session and the epic stays free of Poprawka" \
+  "$(grep -c 'claude --resume v-sess-1' <<<"$v_out")|$(grep -c 'Poprawka' <<<"$v_create")" "1|0"
+expect_eq "  the round marker says who verified" "$(grep -c 'Sesja weryfikatora: v-sess-1' <<<"$v_out")" "1"
+expect_eq "  the cost is on screen" "$(grep -c 'Koszt weryfikacji: \$1.23' <<<"$v_stdout")" "1"
+expect_eq "  the prompt carries the epic body, the gate state and the repo's Ralph section" \
+  "$(grep -c '1. Otwórz stronę' <<<"$v_prompt")|$(grep -c 'zielona' <<<"$v_prompt")|$(grep -c 'ralph-gate:' <<<"$v_prompt")" "1|1|1"
+expect_eq "  the prompt carries the weryfikator's own instructions" "$(grep -c 'You are the weryfikator' <<<"$v_prompt")" "1"
+
+V_REPORT_TEXT=$(mk_reply "{\"findings\":[$R_BLOCK_N,$R_BLOCK_H,$R_PROP,$R_REF],\"items\":[$R_ITEMS]}")
+expect_eq "verify (report): round 1, green gate, two blocking + refactor + proposal -> 2 Poprawki + 1 Refaktor, no label; exit 7" \
+  "$(verify_case "$V_GATE_OK")" "7|gate,verifier,marker,create,create,create"
+verify_artifacts
+expect_eq "  Poprawka titles carry the prefix; each is a sub-issue of the epic and ready-for-agent" \
+  "$(grep -c -e '--title \[ISSUE\] Poprawka: Zamknij wyciek tenantów' <<<"$v_create")|$(grep -c -e '--title \[ISSUE\] Poprawka: Napraw naliczanie' <<<"$v_create")|$(grep -c -e '--parent 45' <<<"$v_create")" "1|1|2"
+expect_eq "  complexity labels follow the report" \
+  "$(grep -c -e '--label complexity:normal' <<<"$v_create")|$(grep -c -e '--label complexity:heavy' <<<"$v_create")" "2|1"
+expect_eq "  the heavy one carries its case list" "$(grep -c 'Przypadki do przetestowania' <<<"$v_create")" "1"
+expect_eq "  the Refaktor has no parent and does not block" \
+  "$(grep -c -e '--title \[ISSUE\] Refaktor: Wydziel serwis cen' <<<"$v_create")|$(grep -v -e '--parent 45' <<<"$v_create" | grep -c -e '--title \[ISSUE\] Refaktor')" "1|1"
+expect_eq "  the proposal makes no issue" "$(grep -c 'Większy przycisk' <<<"$v_create")" "0"
+expect_eq "  no acceptance list yet" "$(grep -c 'Lista odbioru' <<<"$v_out")" "0"
+
+V_EXISTING='[ISSUE] Refaktor: Wydziel serwis cen'
+expect_eq "verify (report): a Refaktor already opened by an earlier round is not opened again" \
+  "$(verify_case "$V_GATE_OK")" "7|gate,verifier,marker,create,create"
+V_EXISTING=''
+verify_artifacts
+
+expect_eq "verify (report): red gate AND blocking findings, round 1 -> the gate's Poprawka plus the findings'" \
+  "$(verify_case "$V_GATE_RED")" "7|gate,verifier,marker,create,create,create,create"
+verify_artifacts
+expect_eq "  both kinds of Poprawka are there" \
+  "$(grep -c -e 'Poprawka: czerwona bramka' <<<"$v_create")|$(grep -c -e 'Poprawka: Zamknij wyciek' <<<"$v_create")" "1|1"
+
+expect_eq "verify (report): round 2, blocking findings remain -> label, unresolved first on the list, no new Poprawka; exit 9" \
+  "$(verify_case "$V_GATE_OK" "$RALPH_VERIFY_MARKER runda 1")" "9|gate,verifier,marker,create,label,list"
+verify_artifacts
+expect_eq "  the only issue opened is the Refaktor" "$(grep -c -e '--title \[ISSUE\] Poprawka' <<<"$v_create")|$(grep -c -e '--title \[ISSUE\] Refaktor' <<<"$v_create")" "0|1"
+expect_eq "  the list: unresolved, steps, report parts, command" \
+  "$(grep -E '^### ' <<<"$v_out" | paste -sd, -)" \
+  "### Nierozwiązane,### Kroki (## Jak odebrać),### Czego bramka nie udowadnia,### Przed / po (wygląd zapowiedziany w PRD),### Propozycje do decyzji,### Odbiór"
+expect_eq "  the unresolved section names both blocking findings" \
+  "$(sed -n '/### Nierozwiązane/,/### Kroki/p' <<<"$v_out" | grep -c -e 'Zamknij wyciek tenantów\|Napraw naliczanie')" "2"
+expect_eq "  the round marker says round 2" "$(grep -c 'runda 2' <<<"$v_out")" "1"
+
+V_REPORT_TEXT=$(mk_reply "{\"findings\":[$R_PROP,$R_REF],\"items\":[$R_ITEMS]}")
+expect_eq "verify (report): only a proposal and a refactor, round 1 -> hand over; the Refaktor is opened, the proposal only listed" \
+  "$(verify_case "$V_GATE_OK")" "9|gate,verifier,marker,create,label,list"
+verify_artifacts
+expect_eq "  the proposal is on the list, under the decision heading" \
+  "$(sed -n '/### Propozycje do decyzji/,/### Odbiór/p' <<<"$v_out" | grep -c 'Większy przycisk')" "1"
+expect_eq "  nothing unresolved" "$(grep -c 'Nierozwiązane' <<<"$v_out")" "0"
+
+V_REPORT_TEXT=$'Chyba jest dobrze, ale nie podam raportu.'
+expect_eq "verify (report): unreadable report -> error; no marker, no label, no issue" \
+  "$(verify_case "$V_GATE_OK")" "1|gate,verifier"
+verify_artifacts
+expect_eq "  says so on screen" "$(grep -c 'nieczytelny' <<<"$v_stdout")" "1"
+V_REPORT_TEXT=$(mk_reply '{"findings":[{"category":"blocking","title":"t","rationale":"r"}]}')
+expect_eq "verify (report): a blocking finding without complexity or criteria -> error, nothing written" \
+  "$(verify_case "$V_GATE_RED")" "1|gate,verifier"
+verify_artifacts
+
+V_REPORT_TEXT="$V_REPORT_EMPTY"
+V_STOP=limit
+expect_eq "verify (report): a usage limit in the weryfikator -> exit 8, nothing written" \
+  "$(verify_case "$V_GATE_OK")" "8|gate,verifier"
+verify_artifacts
+V_STOP=resume-failed
+expect_eq "verify (report): the session cannot be resumed -> error" "$(verify_case "$V_GATE_OK")" "1|gate,verifier"
+verify_artifacts
+V_STOP=
+
+verify_case "$V_GATE_OK" "$V_BODY_DEV"$'\n'"$RALPH_VERIFY_MARKER runda 1" >/dev/null
+verify_artifacts
+expect_eq "verify (report): the deviation comments of the epic reach the weryfikator, the loop's markers do not" \
+  "$(grep -c 'zamiast przycisku OK' <<<"$v_prompt")|$(grep -c 'ralph-weryfikacja' <<<"$v_prompt")" "1|0"
+
+# Wznowienie weryfikatora po limicie (ADR 0017): the ślad of phase `verify` through ralph_resume_from_trace
+verify_resume_case() { # $1: report reply, $2: gate exit code in the ślad
+  V_REPORT_TEXT="$1"
+  (
+    repo=$(mktemp -d); cd "$repo" && git init -q && git checkout -q -b epic/45
+    printf '# T\n\n## Ralph\n\nralph-gate: true\n' > CLAUDE.md
+    export V_CALLS V_COMMENTS VERIFY_OUT VERIFY_CREATE VERIFY_PROMPT VERIFY_RESUMED
+    V_CALLS=$(mktemp); V_COMMENTS=$(mktemp); VERIFY_OUT=$(mktemp); VERIFY_CREATE=$(mktemp)
+    VERIFY_PROMPT=$(mktemp); VERIFY_RESUMED=$(mktemp)
+    SCRIPT_DIR="$SCRIPT_DIR/.."
+    glog="$repo/gate.log"; echo "wyjście bramki" > "$glog"
+    ralph_limit_trace_write runtime=claude phase=verify session=v-sess-1 model=opus effort=high label=verify-45 \
+      resets_at=$(($(date +%s) - 100)) limit=five_hour branch=epic/45 issue=45 epic_gate_rc="$2" epic_round=1 epic_gate_log="$glog"
+    gh() { verify_gh "$@"; }
+    ralph_run_worker_through_limit() { verify_stub_worker "$@"; }
+    v_fail=none
+    ( ralph_resume_from_trace '' ) >"$repo/stdout" 2>&1
+    printf '%s|%s|resumed=%s' "$?" "$(paste -sd, "$V_CALLS")" "$(tr -d '\n' < "$VERIFY_RESUMED")"
+    cp "$VERIFY_OUT" /tmp/ralph-verify-out.$$
+    rm -rf "$repo" "$V_CALLS" "$V_COMMENTS" "$VERIFY_OUT" "$VERIFY_CREATE" "$VERIFY_PROMPT" "$VERIFY_RESUMED"
+  )
+}
+expect_eq "resume: verify phase -> the weryfikator's session is resumed, the gate is not rerun, the epic is handed over; exit 9" \
+  "$(verify_resume_case "$V_REPORT_EMPTY" 0)" "9|verifier,marker,label,list|resumed=v-sess-1"
+verify_artifacts
+expect_eq "  the round marker keeps the ślad's round and the list names the session" \
+  "$(grep -c 'runda 1' <<<"$v_out")|$(grep -c 'claude --resume v-sess-1' <<<"$v_out")" "1|1"
+expect_eq "resume: verify phase, red gate in the ślad, blocking findings (round 1) -> Poprawki, exit 7" \
+  "$(verify_resume_case "$(mk_reply "{\"findings\":[$R_BLOCK_N]}")" 3)" "7|verifier,marker,create,create|resumed=v-sess-1"
+verify_artifacts
+expect_eq "resume: verify phase with an incomplete ślad -> error, the weryfikator is not started" \
+  "$(
+    verify_resume_case "$V_REPORT_EMPTY" '' 
+  )" "1||resumed="
 verify_artifacts
 
 # --- Limit użycia (ADR 0017) ---

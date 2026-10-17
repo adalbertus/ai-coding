@@ -244,7 +244,11 @@ ONCE_SH="$SCRIPT_DIR/../once.sh"
 OFAKE=$(mktemp -d); mkdir -p "$OFAKE/bin"
 cat > "$OFAKE/bin/claude" <<'CL'
 #!/usr/bin/env bash
-echo "claude $*" >> "$ONCE_CALLS"
+# The weryfikator: a finished run with an empty report ($ONCE_REPORT overrides the reply).
+echo verifier >> "$ONCE_CALLS"
+reply=${ONCE_REPORT:-$'Nic nie znalazłem.\n\n```json\n{"findings": [], "items": []}\n```'}
+echo '{"type":"system","subtype":"init","session_id":"v-sess-9"}'
+jq -c -n --arg r "$reply" '{type:"result",is_error:false,num_turns:3,result:$r,total_cost_usd:0.5,session_id:"v-sess-9"}'
 CL
 cat > "$OFAKE/bin/gh" <<'GH'
 #!/usr/bin/env bash
@@ -253,6 +257,7 @@ args="$*"
 case "$args" in
   "issue view 50 --json title"*) echo "[PRD] Epic" ;;
   "issue view 50 --json labels"*) cat "$OFAKE_DIR/label" ;;
+  "issue view 50 --json number,title,body"*) printf '## Epic #50: [PRD] Epic\n\n## Jak odebrać\n\n1. Zrób krok\n' ;;
   "issue view 50 --json body"*) printf '## Jak odebrać\n\n1. Zrób krok\n' ;;
   "issue list --label needs-human-test"*) ;;
   "issue list --state open"*) echo 50 ;;
@@ -291,23 +296,33 @@ GATE_N='echo gate >> "$ONCE_CALLS"; exit 1'
 
 once_case "$ALL_CLOSED" false '[]' "$GATE_Y" 50
 expect "ralph-once <epic>, all sub-issues closed, gate green -> exit 9 (do odbioru)" 9 'claude "/odbior 50"'
-expect_eq "  gate, round marker, label, acceptance list" "$(calls)" "gate,comment-epic,label-epic,comment-epic"
+expect_eq "  gate, weryfikator, round marker, label, acceptance list" "$(calls)" "gate,verifier,comment-epic,label-epic,comment-epic"
 
 # With ralph-base-branch the weryfikacja runs the gate on epic/<nr>, not on the checkout it started
 # from: the gate only passes when t/epic (present on epic/50 alone) exists.
 GATE_FILE='test -f t/epic && echo gate >> "$ONCE_CALLS"'
 ONCE_EPIC_BRANCH=1 once_case "$ALL_CLOSED" false '[]' "$GATE_FILE" 50
 expect "ralph-once <epic> with ralph-base-branch, started on main -> gate sees the epic's code, exit 9" 9 'claude "/odbior 50"'
-expect_eq "  gate, round marker, label, acceptance list" "$(calls)" "gate,comment-epic,label-epic,comment-epic"
+expect_eq "  gate, weryfikator, round marker, label, acceptance list" "$(calls)" "gate,verifier,comment-epic,label-epic,comment-epic"
 expect_eq "  repo ends on epic/50" "$LAST_BRANCH" "epic/50"
 
 once_case "$ALL_CLOSED" false '[]' "$GATE_N" 50
 expect "ralph-once <epic>, gate red in round 1 -> exit 7, a Poprawka under the epic" 7 "Poprawka"
-expect_eq "  gate, round marker, create — and no label" "$(calls | sed 's/create: .*/create/')" "gate,comment-epic,create"
+expect_eq "  gate, round marker, create — and no label" "$(calls | sed 's/create: .*/create/')" "gate,verifier,comment-epic,create"
 
 once_case "$ALL_CLOSED" false '[{"body":"<!-- ralph-weryfikacja: runda -->\nrunda 1"}]' "$GATE_N" 50
 expect "ralph-once <epic>, gate red in round 2 -> exit 9, labelled, no new Poprawka" 9 "oznaczony needs-human-test"
-expect_eq "  gate, round marker, label, list" "$(calls)" "gate,comment-epic,label-epic,comment-epic"
+expect_eq "  gate, round marker, label, list" "$(calls)" "gate,verifier,comment-epic,label-epic,comment-epic"
+
+export ONCE_REPORT=$'Znalazłem wyciek.\n\n```json\n{"findings":[{"category":"blocking","title":"Zamknij wyciek","rationale":"r","complexity":"normal","acceptance":["a"]}],"items":[]}\n```'
+once_case "$ALL_CLOSED" false '[]' "$GATE_Y" 50
+expect "ralph-once <epic>, blocking finding in round 1 -> exit 7, a Poprawka from the report" 7 "Poprawka"
+expect_eq "  gate, weryfikator, round marker, create — and no label" "$(calls | sed 's/create: .*/create/')" "gate,verifier,comment-epic,create"
+ONCE_REPORT='Bez raportu.'
+once_case "$ALL_CLOSED" false '[]' "$GATE_Y" 50
+expect "ralph-once <epic>, unreadable report -> exit 1, epic not labelled" 1 "nieczytelny"
+expect_eq "  gate, weryfikator — nothing written" "$(calls)" "gate,verifier"
+unset ONCE_REPORT
 
 once_case "$ALL_CLOSED" true '[]' "$GATE_Y" 50
 expect "ralph-once <epic> already labelled needs-human-test -> exit 2, not verified again" 2 "czeka na odbiór"

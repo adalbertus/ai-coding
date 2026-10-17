@@ -8,8 +8,9 @@
 # An issue without `ready-for-agent` (HITL) opens an interactive session; without a number only AFK is taken.
 # `ralph-once <epic>` ([PRD] prefix) works one of that epic's open sub-issues: the lowest-numbered free one.
 # An epic whose sub-issues are all closed (and without `needs-human-test`) is verified instead: the
-# bramka over the whole epic, then either `needs-human-test` with the acceptance list or, in
-# round 1, a "Poprawka" sub-issue (ADR 0018). This is the only way an epic gets `needs-human-test`.
+# bramka over the whole epic, the weryfikator (Opus, report parsed by the script), then either
+# `needs-human-test` with the acceptance list or, in round 1, "Poprawka" sub-issues (ADR 0018).
+# This is the only way an epic gets `needs-human-test`.
 # In loop mode a started epic (>=1 closed sub-issue) is finished before others are touched (ADR 0012).
 # Inside an epic, free AFK sub-issues go first; only when none is left is a free HITL one (no
 # `ready-for-agent`) taken and a HITL session opens (ADR 0013). The model selector runs only outside
@@ -25,18 +26,19 @@
 #   6  HITL session ended, issue open with `ready-for-agent` restored (handed back to AFK)
 #   7  przegląd heavy or the bramka failed once: the issue is reopened with its notes for one fix
 #      (ADR 0016, ADR 0018); a second failure of either gives 3 (AFK failed, a human is needed).
-#      Also the weryfikacja of an epic whose bramka was red in round 1: a "Poprawka" sub-issue was
-#      opened and the loop goes on
+#      Also the weryfikacja of an epic with a red bramka or blocking findings in round 1: "Poprawka"
+#      sub-issues were opened and the loop goes on
 #   8  a usage limit stopped the run and its reset is too far to wait for; the ślad is left so the
 #      next run resumes the same session (ADR 0017)
 #   9  weryfikacja epica handed the epic over to acceptance (`needs-human-test` and the acceptance
 #      list are set); ralph-epic stops as at a ready epic
 #
-# Wznowienie po limicie (ADR 0017): a Claude worker or przegląd heavy cut off by a usage limit
-# waits for the reset (up to 6 h) and resumes its session. A later run finds the ślad and resumes
-# before anything else — the gate, the strażnik and the clean-tree check do not apply to it.
-# A resumed worker that closed the issue goes through the bramka like any run; a resumed przegląd
-# heavy does not run it again (the bramka was green before the przegląd began).
+# Wznowienie po limicie (ADR 0017): a Claude worker, przegląd heavy or epic weryfikator cut off by
+# a usage limit waits for the reset (up to 6 h) and resumes its session. A later run finds the
+# ślad and resumes before anything else — the gate, the strażnik and the clean-tree check do not
+# apply to it. A resumed worker that closed the issue goes through the bramka like any run; a
+# resumed przegląd heavy or weryfikator does not run it again (the bramka was green before the
+# przegląd, and the weryfikator's gate result is kept in the ślad).
 
 # Self-locate: this script + its sibling prompts/guard live together (in the shared ralph/
 # dir, reached via a symlink on PATH). `realpath` resolves that symlink so prompts are read

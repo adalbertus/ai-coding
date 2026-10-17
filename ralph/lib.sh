@@ -211,6 +211,13 @@ ralph_review_model() {
   RALPH_REVIEW_EFFORT="high"
 }
 
+# The model for the weryfikator of an epic (ADR 0018): the strongest tier at high effort, like the
+# przegląd heavy. Not affected by --force-model.
+ralph_verifier_model() {
+  RALPH_VERIFIER_MODEL="opus"
+  RALPH_VERIFIER_EFFORT="high"
+}
+
 ralph_model_display() {
   echo "$1 (effort:$2)"
 }
@@ -487,10 +494,11 @@ ralph_limit_trace_clear() {
   f=$(ralph_limit_trace_path) && rm -f "$f"
 }
 
-# Pure. Why a ślad no longer fits, or nothing when it does. $1: phase (worker|review); $2: issue
-# state (open|closed); $3: "true" when it has ready-for-agent; $4: branch in the ślad; $5: current
-# branch. The issue must be as the interrupted run left it: open and AFK for the worker, closed
-# (by the worker) for the przegląd heavy.
+# Pure. Why a ślad no longer fits, or nothing when it does. $1: phase (worker|review|verify); $2:
+# issue state (open|closed); $3: "true" when it has ready-for-agent (for verify: when the epic has
+# needs-human-test); $4: branch in the ślad; $5: current branch. The issue must be as the
+# interrupted run left it: open and AFK for the worker, closed (by the worker) for the przegląd
+# heavy, an open epic not yet handed to acceptance for the weryfikacja.
 ralph_limit_trace_stale() {
   if [ "$4" != "$5" ]; then
     echo "run przerwano na gałęzi $4, a bieżąca to ${5:-(brak)}"
@@ -498,6 +506,10 @@ ralph_limit_trace_stale() {
   fi
   case "$1" in
     review) [ "$2" = closed ] || echo "przerwany był przegląd heavy, a issue nie jest już zamknięte" ;;
+    verify)
+      if [ "$2" != open ]; then echo "epic jest już zamknięty"
+      elif [ "$3" = true ]; then echo "epic ma już needs-human-test"
+      fi ;;
     *)
       if [ "$2" != open ]; then echo "issue jest już zamknięte"
       elif [ "$3" != true ]; then echo "issue nie ma już ready-for-agent"
@@ -510,7 +522,7 @@ ralph_limit_trace_stale() {
 # not answer (left alone); or a stale ślad, including one left by the retired Codex runtime
 # (removed, one line on screen).
 ralph_limit_trace_applies() {
-  local arg="$1" f issue state ready reason
+  local arg="$1" f issue state ready reason phase
   f=$(ralph_limit_trace_path) && [ -f "$f" ] || return 1
   issue=$(ralph_limit_trace_get issue)
   if [ "$(ralph_limit_trace_get runtime)" != claude ]; then
@@ -523,12 +535,15 @@ ralph_limit_trace_applies() {
     return 1
   fi
   state=$(gh issue view "$issue" --json state --jq '.state | ascii_downcase' 2>/dev/null)
-  ready=$(gh issue view "$issue" --json labels --jq 'any(.labels[]; .name == "ready-for-agent")' 2>/dev/null)
+  phase=$(ralph_limit_trace_get phase)
+  # The label that matters: ready-for-agent for a worker, needs-human-test for an epic's weryfikacja.
+  ready=$(gh issue view "$issue" --json labels \
+    --jq "any(.labels[]; .name == \"$([ "$phase" = verify ] && echo needs-human-test || echo ready-for-agent)\")" 2>/dev/null)
   if [ -z "$state" ]; then
     ralph_say warn "Nie udało się sprawdzić issue #${issue} ze śladu limitu użycia (gh) — zostawiam ślad, działam według zwykłych reguł."
     return 1
   fi
-  reason=$(ralph_limit_trace_stale "$(ralph_limit_trace_get phase)" "$state" "$ready" \
+  reason=$(ralph_limit_trace_stale "$phase" "$state" "$ready" \
     "$(ralph_limit_trace_get branch)" "$(git branch --show-current 2>/dev/null)")
   if [ -n "$reason" ]; then
     ralph_say warn "Usuwam nieaktualny ślad limitu użycia (issue #${issue}): ${reason}. Działam według zwykłych reguł."
@@ -1302,14 +1317,91 @@ ralph_verify_round() {
       if ($b | contains($o)) then 0 elif ($b | contains($v)) then . + 1 else . end) + 1'
 }
 
-# Pure. $1: exit code of the epic's gate, $2: the round number -> accept (green: hand over to
-# acceptance), fix (red in round 1: a "Poprawka" sub-issue, verify again after it) or
-# accept-red (red in round 2 or later: hand over anyway, the red gate on top of the list).
+# Pure. $1: exit code of the epic's gate, $2: the round number, $3: blocking findings in the
+# weryfikator's report (default 0) -> accept (nothing blocks: hand over to acceptance), fix (round 1
+# with something blocking: "Poprawka" sub-issues, verify again after them) or accept-red (round 2
+# or later with something still blocking: hand over anyway, the unresolved on top of the list).
 ralph_verify_decision() {
-  if [ "$1" = 0 ]; then echo accept
+  if [ "$1" = 0 ] && [ "${3:-0}" -eq 0 ]; then echo accept
   elif [ "${2:-1}" -ge 2 ]; then echo accept-red
   else echo fix
   fi
+}
+
+# --- The weryfikator's report (ADR 0018): the last ```json block of its reply. Pure readers. ---
+
+# stdin: the weryfikator's reply -> the report as compact JSON, normalised ({findings, items}), or
+# nothing with rc 1 when it is unreadable: no json block, not JSON, a finding of an unknown
+# category, without title or rationale, a blocking one without a complexity (trivial|normal|heavy)
+# or acceptance criteria, a heavy one without cases, an acceptance item of an unknown kind. Only
+# the LAST block counts, so an example earlier in the reply does no harm.
+ralph_report_parse() {
+  local json
+  json=$(awk '
+    /^[[:space:]]*```json[[:space:]]*$/ { on = 1; buf = ""; next }
+    on && /^[[:space:]]*```[[:space:]]*$/ { on = 0; last = buf; next }
+    on { buf = buf $0 "\n" }
+    END { printf "%s", last }')
+  [ -n "$json" ] || return 1
+  jq -e -c '
+    def s: type == "string" and test("\\S");
+    def strs: type == "array" and all(.[]; s);
+    def finding_ok:
+      type == "object" and (.category | IN("blocking", "proposal", "refactor"))
+      and (.title | s) and (.rationale | s)
+      and ((.complexity // "normal") | IN("trivial", "normal", "heavy"))
+      and ((.acceptance // []) | strs) and ((.cases // []) | strs)
+      and (if .category == "blocking" then
+             (.complexity | IN("trivial", "normal", "heavy")) and ((.acceptance // []) | length > 0)
+             and (if .complexity == "heavy" then ((.cases // []) | length > 0) else true end)
+           else true end);
+    def item_ok: type == "object" and (.kind | IN("not-proven", "before-after")) and (.text | s);
+    if type == "object" and (.findings | type == "array") and ((.items // []) | type == "array")
+       and all(.findings[]; finding_ok) and all((.items // [])[]; item_ok) then
+      {findings: [.findings[] | {category, title, rationale, area: (.area // ""),
+                                 complexity: (.complexity // "normal"),
+                                 acceptance: (.acceptance // []), cases: (.cases // [])}],
+       items: [(.items // [])[] | {kind, text}]}
+    else empty end' <<<"$json" 2>/dev/null || return 1
+}
+
+# Pure. $1: the parsed report, $2: category -> the findings of that category, one compact JSON each.
+ralph_report_findings() {
+  jq -c --arg c "$2" '.findings[] | select(.category == $c)' <<<"$1"
+}
+
+# Pure. $1: the parsed report -> the number of blocking findings.
+ralph_report_blocking_count() {
+  jq -r '[.findings[] | select(.category == "blocking")] | length' <<<"$1"
+}
+
+# Pure. $1: a finding (compact JSON), $2: epic number, $3: round -> the body of the sub-issue that
+# fixes it. A heavy one carries the case list the przegląd heavy holds its tests to.
+ralph_report_issue_body() {
+  jq -r --arg epic "$2" --arg round "$3" '
+    "## What to build\n\n" + .rationale
+    + "\n\n(Znalezisko weryfikacji epicu #" + $epic + ", runda " + $round
+    + (if .area != "" then ", obszar: " + .area else "" end) + ".)"
+    + (if (.acceptance | length) > 0 then
+         "\n\n## Acceptance criteria\n\n" + ([.acceptance[] | "- [ ] " + .] | join("\n")) else "" end)
+    + (if .complexity == "heavy" then
+         "\n\n## Przypadki do przetestowania\n\nheavy — poprawka z weryfikacji epicu.\n\n" + ([.cases[] | "- " + .] | join("\n"))
+       else "" end)' <<<"$1"
+}
+
+# Pure. $1: the parsed report -> the blocking findings as list bullets (the unresolved ones).
+ralph_report_unresolved() {
+  jq -r '.findings[] | select(.category == "blocking") | "- **" + .title + "** — " + .rationale' <<<"$1"
+}
+
+# Pure. $1: the parsed report -> the report's parts of the acceptance list: what the gate does not
+# prove, before / after, proposals for a decision. Each part only when it has something in it.
+ralph_report_sections() {
+  jq -r '
+    def part($h; $lines): if ($lines | length) > 0 then "### " + $h + "\n\n" + ($lines | join("\n")) + "\n" else empty end;
+    part("Czego bramka nie udowadnia"; [.items[] | select(.kind == "not-proven") | "- " + .text]),
+    part("Przed / po (wygląd zapowiedziany w PRD)"; [.items[] | select(.kind == "before-after") | "- " + .text]),
+    part("Propozycje do decyzji"; [.findings[] | select(.category == "proposal") | "- **" + .title + "** — " + .rationale])' <<<"$1"
 }
 
 # Pure. stdin: an epic's body -> the lines of its `## Jak odebrać` section (without the heading).
@@ -1324,27 +1416,205 @@ ralph_acceptance_command() {
 }
 
 # Pure. The acceptance list comment. $1: epic number, $2: the `## Jak odebrać` steps, $3: the
-# acceptance command; optional, when the gate is red: $4: its command, $5: exit code, $6: the end
-# of its output, $7: the log path. Unresolved findings go first.
+# acceptance command; optional: $4: the gate command when it is red, $5: its exit code, $6: the end
+# of its output, $7: the log path; $8: the unresolved findings (bullets); $9: the report's parts
+# (ralph_report_sections); $10: the weryfikator's session id. Unresolved findings go first.
 ralph_acceptance_list() {
   local epic="$1" steps="$2" cmdline="$3" gate_cmd="${4:-}" rc="${5:-}" tail_out="${6:-}" log="${7:-}"
+  local unresolved="${8:-}" sections="${9:-}" session="${10:-}"
   printf '%s\n## Lista odbioru epicu #%s\n\n' "$RALPH_ACCEPT_LIST_MARKER" "$epic"
-  if [ -n "$gate_cmd" ]; then
-    printf '### Nierozwiązane\n\n- Bramka (`%s`) jest czerwona także po poprawce (kod %s). Koniec wyjścia:\n\n````\n%s\n````\n\nPełne wyjście: %s\n\n' \
-      "$gate_cmd" "$rc" "$tail_out" "$log"
+  if [ -n "$gate_cmd" ] || [ -n "$unresolved" ]; then
+    printf '### Nierozwiązane\n\n'
+    if [ -n "$gate_cmd" ]; then
+      printf -- '- Bramka (`%s`) jest czerwona także po poprawce (kod %s). Koniec wyjścia:\n\n````\n%s\n````\n\nPełne wyjście: %s\n\n' \
+        "$gate_cmd" "$rc" "$tail_out" "$log"
+    fi
+    [ -z "$unresolved" ] || printf '%s\n\n' "$unresolved"
   fi
   printf '### Kroki (## Jak odebrać)\n\n%s\n\n' "${steps:-Epic nie ma sekcji ## Jak odebrać.}"
+  [ -z "$sections" ] || printf '%s\n' "$sections"
   printf '### Odbiór\n\n```\n%s\n```\n' "$cmdline"
+  [ -z "$session" ] || printf '\nSesja weryfikatora (możesz ją dopytać): `claude --resume %s`\n' "$session"
+}
+
+# stdin: the epic's comments as a JSON array of {body} -> the ones the owner or a worker wrote
+# (deviations from the plan), without the loop's own markers, joined for the weryfikator.
+ralph_verify_deviations() {
+  jq -r --arg v "$RALPH_VERIFY_MARKER" --arg o "$RALPH_ODBIOR_MARKER" --arg l "$RALPH_ACCEPT_LIST_MARKER" '
+    [.[] | select(.body | (contains($v) or contains($o) or contains($l)) | not) | .body] | join("\n\n---\n\n")'
+}
+
+# Runs the weryfikator over epic $1: Opus with read-only tools, through the usage limit (phase
+# `verify` in the ślad, ADR 0017). $2: round, $3: the gate's exit code, $4: the gate's log, $5: the
+# gate command, $6: the evidence ("Dowody") text, $7: the epic's comments (JSON array); $8: a session
+# to resume (a restart from the ślad; then $6 and $7 are not used). Sets RALPH_VERIFIER_REPORT,
+# RALPH_VERIFIER_SESSION and RALPH_VERIFIER_COST; rc 1 with RALPH_VERIFY_EXIT set when the run
+# stopped on a usage limit (ślad left) or the session could not be resumed.
+ralph_verifier_run() {
+  local epic="$1" round="$2" rc="$3" log="$4" cmd="$5" evidence="$6" comments="$7" session="${8:-}"
+  local root epic_text range input="" gate_state no_range
+  no_range="none (no base branch declared, or no epic branch): use git log for the epic work"
+  RALPH_VERIFIER_REPORT=""; RALPH_VERIFIER_SESSION=""; RALPH_VERIFIER_COST=""
+  ralph_verifier_model
+  if [ -z "$session" ]; then
+    root=$(git rev-parse --show-toplevel 2>/dev/null) || root=.
+    epic_text=$(gh issue view "$epic" --json number,title,body \
+      --jq '"## Epic #\(.number): \(.title)\n\n\(.body)\n"' 2>/dev/null)
+    range=$(ralph_epic_range "$epic")
+    gate_state="zielona"; [ "$rc" = 0 ] || gate_state="CZERWONA (kod ${rc})"
+    input="Epic under verification (round ${round}): ${epic_text}
+
+### Deviation comments in the epic
+
+$(ralph_verify_deviations <<<"$comments")
+
+### Commit range
+
+${range:-$no_range}
+
+### Gate (${cmd})
+
+The gate ran over the whole epic and is ${gate_state}. End of its output:
+
+$(ralph_gate_tail "$log")
+
+### Evidence
+
+${evidence:-none}
+
+### The repo's ## Ralph section (use its part about what the gate does not prove)
+
+$(ralph_contract_section "$root/$(ralph_contract_file)" 2>/dev/null)
+"
+  fi
+  RALPH_LIMIT_CONTEXT=$(printf 'issue=%s\nepic_gate_rc=%s\nepic_round=%s\nepic_gate_log=%s' "$epic" "$rc" "$round" "$log")
+  ralph_say dim "Weryfikator epicu #${epic} na $(ralph_model_display "$RALPH_VERIFIER_MODEL" "$RALPH_VERIFIER_EFFORT")..."
+  RALPH_LAST_LOG=""
+  RALPH_REPORT_TITLE="Raport weryfikatora" ralph_run_worker_through_limit "$RALPH_VERIFIER_MODEL" "$RALPH_VERIFIER_EFFORT" \
+    "${input}$(ralph_render_prompt "$SCRIPT_DIR/prompt-verify.md")" "verify-${epic}" review verify "$session"
+  case "${RALPH_LIMIT_STOP:-}" in
+    limit) RALPH_VERIFY_EXIT="$RALPH_EXIT_USAGE_LIMIT"; return 1 ;;
+    resume-failed) RALPH_VERIFY_EXIT="$RALPH_EXIT_ERROR"; return 1 ;;
+  esac
+  if [ -n "$RALPH_LAST_LOG" ]; then
+    RALPH_VERIFIER_REPORT=$(ralph_last_report "$RALPH_LAST_LOG")
+    RALPH_VERIFIER_SESSION=$(ralph_stream_session_id "$RALPH_LAST_LOG")
+    RALPH_VERIFIER_COST=$(ralph_run_cost "$RALPH_LAST_LOG")
+  fi
+  [ -z "$RALPH_VERIFIER_COST" ] || ralph_say dim "Koszt weryfikacji: $RALPH_VERIFIER_COST"
+}
+
+# Creates the issue for one finding. $1: title, $2: body, $3: complexity, $4: parent epic (empty =
+# none). rc 1 when GitHub refuses.
+ralph_verify_create_issue() {
+  local parent=()
+  [ -z "$4" ] || parent=(--parent "$4")
+  gh issue create --title "$1" --body "$2" --label "complexity:$3" --label ready-for-agent \
+    ${parent[@]+"${parent[@]}"} >/dev/null 2>&1
+}
+
+# What follows the weryfikator's reply: reads the report, writes the round marker, then acts on
+# ralph_verify_decision. $1: epic, $2: round, $3: gate exit code, $4: the gate's log, $5: the gate
+# command, $6: the weryfikator's reply, $7: its session id. Sets RALPH_VERIFY_EXIT as
+# ralph_verify_epic documents. An unreadable report is an error: nothing is written, the epic is
+# not labelled.
+ralph_verify_conclude() {
+  local epic="$1" round="$2" rc="$3" log="$4" cmd="$5" reply="$6" session="$7"
+  local report blocking decision body steps cmdline tail_out root titles f title
+  RALPH_VERIFY_EXIT="$RALPH_EXIT_ERROR"
+  root=$(git rev-parse --show-toplevel 2>/dev/null) || root=.
+  tail_out=$(ralph_gate_tail "$log")
+  if ! report=$(ralph_report_parse <<<"$reply") || [ -z "$report" ]; then
+    ralph_say err "✗ Raport weryfikatora epicu #${epic} jest nieczytelny (brak bloku json albo błędne pola) — epic nieoznaczony, nic nie zapisano. Log weryfikatora: ${RALPH_LAST_LOG:-brak}"
+    return 0
+  fi
+  blocking=$(ralph_report_blocking_count "$report")
+
+  if ! gh issue comment "$epic" --body "${RALPH_VERIFY_MARKER}
+Weryfikacja epicu: runda ${round}, bramka $([ "$rc" = 0 ] && echo zielona || echo "czerwona (kod ${rc})"), blokujących znalezisk: ${blocking}. Log: ${log}$([ -z "$session" ] || echo ". Sesja weryfikatora: ${session}")" >/dev/null 2>&1; then
+    ralph_say err "✗ Nie udało się zapisać komentarza rundy w epicu #${epic} — przerywam, żeby nie weryfikować w kółko."
+    return 0
+  fi
+
+  # "Refaktor" issues have no parent and never block; one already open under the same title is
+  # not opened again by a later round.
+  titles=$(gh issue list --state all --limit 200 --json title --jq '.[].title' 2>/dev/null)
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    title="[ISSUE] Refaktor: $(jq -r .title <<<"$f")"
+    grep -qxF -- "$title" <<<"$titles" && continue
+    if ! ralph_verify_create_issue "$title" "$(ralph_report_issue_body "$f" "$epic" "$round")" "$(jq -r .complexity <<<"$f")" ""; then
+      ralph_say err "✗ Nie udało się założyć issue „${title}”."
+      return 0
+    fi
+  done < <(ralph_report_findings "$report" refactor)
+
+  decision=$(ralph_verify_decision "$rc" "$round" "$blocking")
+  case "$decision" in
+    fix)
+      if [ "$rc" != 0 ]; then
+        body="## What to build
+
+Bramka (\`${cmd}\`) jest czerwona na całym epicu #${epic} (weryfikacja epicu, runda ${round}, kod ${rc}). Ustal przyczynę i napraw ją; nie osłabiaj testów, żeby przeszły.
+
+Koniec wyjścia:
+
+\`\`\`\`
+${tail_out}
+\`\`\`\`
+
+Pełne wyjście: ${log}
+
+## Acceptance criteria
+
+- [ ] Bramka (\`${cmd}\`) jest zielona na gałęzi epicu."
+        if ! ralph_verify_create_issue "[ISSUE] Poprawka: czerwona bramka" "$body" normal "$epic"; then
+          ralph_say err "✗ Nie udało się założyć sub-issue „Poprawka: czerwona bramka” w epicu #${epic}."
+          return 0
+        fi
+      fi
+      while IFS= read -r f; do
+        [ -n "$f" ] || continue
+        title="[ISSUE] Poprawka: $(jq -r .title <<<"$f")"
+        if ! ralph_verify_create_issue "$title" "$(ralph_report_issue_body "$f" "$epic" "$round")" "$(jq -r .complexity <<<"$f")" "$epic"; then
+          ralph_say err "✗ Nie udało się założyć sub-issue „${title}” w epicu #${epic}."
+          return 0
+        fi
+      done < <(ralph_report_findings "$report" blocking)
+      ralph_say warn "⚠ Epic #${epic}: weryfikacja w rundzie ${round} znalazła blokujące (bramka $([ "$rc" = 0 ] && echo zielona || echo czerwona), znalezisk: ${blocking}) — założone sub-issues „Poprawka”, po nich weryfikacja ruszy znowu."
+      RALPH_VERIFY_EXIT="$RALPH_EXIT_REVIEW_RETRY" ;;
+    *)
+      steps=$(gh issue view "$epic" --json body --jq .body 2>/dev/null | ralph_epic_acceptance_steps)
+      cmdline=$(ralph_acceptance_command "$epic" "$root")
+      if [ "$decision" = accept-red ]; then
+        body=$(ralph_acceptance_list "$epic" "$steps" "$cmdline" "$([ "$rc" = 0 ] || echo "$cmd")" "$rc" "$tail_out" "$log" \
+          "$(ralph_report_unresolved "$report")" "$(ralph_report_sections "$report")" "$session")
+      else
+        body=$(ralph_acceptance_list "$epic" "$steps" "$cmdline" "" "" "" "" "" "$(ralph_report_sections "$report")" "$session")
+      fi
+      gh label create needs-human-test --color 5319E7 \
+        --description "Implemented; awaiting human verification" >/dev/null 2>&1 || true
+      if ! gh issue edit "$epic" --add-label needs-human-test >/dev/null 2>&1 \
+          || ! gh issue comment "$epic" --body "$body" >/dev/null 2>&1; then
+        ralph_say err "✗ Nie udało się oznaczyć epicu #${epic} (needs-human-test) albo zapisać listy odbioru."
+        return 0
+      fi
+      ralph_say ok "✓ Epic #${epic}: weryfikacja zakończona$([ "$decision" = accept-red ] && echo ", nierozwiązane znaleziska na początku listy odbioru") — oznaczony needs-human-test (do odbioru)."
+      [ -z "$session" ] || ralph_say dim "Sesja weryfikatora: claude --resume $session"
+      echo "$cmdline"
+      RALPH_VERIFY_EXIT="$RALPH_EXIT_ACCEPTANCE" ;;
+  esac
 }
 
 # Runs the verification of epic $1 (state to-verify), in the repo in cwd, on the branch the caller
-# put it on: the ralph-gate: command, the round marker, then what ralph_verify_decision says.
-# Leaves in RALPH_VERIFY_EXIT the exit code once.sh should report: RALPH_EXIT_ACCEPTANCE (the
+# put it on: the ralph-gate: command, the evidence, the weryfikator, then what ralph_verify_decision
+# says. Leaves in RALPH_VERIFY_EXIT the exit code once.sh should report: RALPH_EXIT_ACCEPTANCE (the
 # epic is labelled `needs-human-test`, with the acceptance list), RALPH_EXIT_REVIEW_RETRY (round 1
-# red: a "Poprawka" sub-issue was opened, the loop goes on) or RALPH_EXIT_ERROR. Every GitHub
+# with something blocking: "Poprawka" sub-issues were opened, the loop goes on), RALPH_EXIT_USAGE_LIMIT
+# (a usage limit stopped the weryfikator; the ślad resumes it) or RALPH_EXIT_ERROR. Every GitHub
 # write that fails is an error: a verification that left no marker would run forever.
 ralph_verify_epic() {
-  local epic="$1" root cmd dir log start rc out comments round decision body steps cmdline tail_out
+  local epic="$1" root cmd dir log start rc out comments round evidence
   RALPH_VERIFY_EXIT="$RALPH_EXIT_ERROR"
   root=$(git rev-parse --show-toplevel 2>/dev/null) || root=.
   cmd=$(ralph_contract_section "$root/$(ralph_contract_file)" 2>/dev/null | ralph_gate_command) || cmd=""
@@ -1370,59 +1640,28 @@ ralph_verify_epic() {
   else
     ralph_say err "✗ Bramka czerwona (kod ${rc}, $((SECONDS - start)) s). Log: $log"
   fi
-  tail_out=$(ralph_gate_tail "$log")
-  ralph_evidence "$epic" >>"$log" 2>&1
+  evidence=$(ralph_evidence "$epic" 2>>"$log")
+  [ -z "$evidence" ] || printf '%s\n' "$evidence" > "${log%.log}-dowody.md"
 
-  if ! gh issue comment "$epic" --body "${RALPH_VERIFY_MARKER}
-Weryfikacja epicu: runda ${round}, bramka $([ "$rc" = 0 ] && echo zielona || echo "czerwona (kod ${rc})"). Log: ${log}" >/dev/null 2>&1; then
-    ralph_say err "✗ Nie udało się zapisać komentarza rundy w epicu #${epic} — przerywam, żeby nie weryfikować w kółko."
+  ralph_verifier_run "$epic" "$round" "$rc" "$log" "$cmd" "$evidence" "$comments" || return 0
+  ralph_verify_conclude "$epic" "$round" "$rc" "$log" "$cmd" "$RALPH_VERIFIER_REPORT" "$RALPH_VERIFIER_SESSION"
+}
+
+# Resumes the weryfikator of epic $1 from the ślad (ADR 0017): the same session $2, the gate's
+# result and the round as the interrupted run recorded them. Sets RALPH_VERIFY_EXIT.
+ralph_verify_resume() {
+  local epic="$1" session="$2" root cmd rc round log
+  RALPH_VERIFY_EXIT="$RALPH_EXIT_ERROR"
+  root=$(git rev-parse --show-toplevel 2>/dev/null) || root=.
+  cmd=$(ralph_contract_section "$root/$(ralph_contract_file)" 2>/dev/null | ralph_gate_command) || cmd=""
+  rc=$(ralph_limit_trace_get epic_gate_rc); round=$(ralph_limit_trace_get epic_round)
+  log=$(ralph_limit_trace_get epic_gate_log)
+  if [ -z "$rc" ] || [ -z "$round" ] || [ ! -f "$log" ]; then
+    ralph_say err "✗ Ślad weryfikacji epicu #${epic} jest niepełny (wynik bramki, runda albo jej log) — usuń go ($(ralph_limit_trace_path)), żeby zacząć weryfikację od nowa."
     return 0
   fi
-
-  decision=$(ralph_verify_decision "$rc" "$round")
-  case "$decision" in
-    fix)
-      body="## What to build
-
-Bramka (\`${cmd}\`) jest czerwona na całym epicu #${epic} (weryfikacja epicu, runda ${round}, kod ${rc}). Ustal przyczynę i napraw ją; nie osłabiaj testów, żeby przeszły.
-
-Koniec wyjścia:
-
-\`\`\`\`
-${tail_out}
-\`\`\`\`
-
-Pełne wyjście: ${log}
-
-## Acceptance criteria
-
-- [ ] Bramka (\`${cmd}\`) jest zielona na gałęzi epicu."
-      if ! gh issue create --title "[ISSUE] Poprawka: czerwona bramka" --body "$body" \
-          --label complexity:normal --label ready-for-agent --parent "$epic" >/dev/null 2>&1; then
-        ralph_say err "✗ Nie udało się założyć sub-issue „Poprawka: czerwona bramka” w epicu #${epic}."
-        return 0
-      fi
-      ralph_say warn "⚠ Epic #${epic}: bramka czerwona w rundzie ${round} — założone sub-issue „Poprawka: czerwona bramka”, po nim weryfikacja ruszy znowu."
-      RALPH_VERIFY_EXIT="$RALPH_EXIT_REVIEW_RETRY" ;;
-    *)
-      steps=$(gh issue view "$epic" --json body --jq .body 2>/dev/null | ralph_epic_acceptance_steps)
-      cmdline=$(ralph_acceptance_command "$epic" "$root")
-      if [ "$decision" = accept-red ]; then
-        body=$(ralph_acceptance_list "$epic" "$steps" "$cmdline" "$cmd" "$rc" "$tail_out" "$log")
-      else
-        body=$(ralph_acceptance_list "$epic" "$steps" "$cmdline")
-      fi
-      gh label create needs-human-test --color 5319E7 \
-        --description "Implemented; awaiting human verification" >/dev/null 2>&1 || true
-      if ! gh issue edit "$epic" --add-label needs-human-test >/dev/null 2>&1 \
-          || ! gh issue comment "$epic" --body "$body" >/dev/null 2>&1; then
-        ralph_say err "✗ Nie udało się oznaczyć epicu #${epic} (needs-human-test) albo zapisać listy odbioru."
-        return 0
-      fi
-      ralph_say ok "✓ Epic #${epic}: weryfikacja zakończona$([ "$decision" = accept-red ] && echo ", bramka nadal czerwona (na początku listy odbioru)") — oznaczony needs-human-test (do odbioru)."
-      echo "$cmdline"
-      RALPH_VERIFY_EXIT="$RALPH_EXIT_ACCEPTANCE" ;;
-  esac
+  ralph_verifier_run "$epic" "$round" "$rc" "$log" "$cmd" "" "" "$session" || return 0
+  ralph_verify_conclude "$epic" "$round" "$rc" "$log" "$cmd" "$RALPH_VERIFIER_REPORT" "${RALPH_VERIFIER_SESSION:-$session}"
 }
 
 # --- The end of a ralph-once run: what follows the worker, shared by a fresh run and a resumed one. ---
@@ -1492,8 +1731,13 @@ ralph_resume_from_trace() {
   session=$(ralph_limit_trace_get session)
   pre_head=$(ralph_limit_trace_get pre_head)
   complexity=$(ralph_limit_trace_get complexity)
-  RALPH_LIMIT_CONTEXT=$(printf 'issue=%s\npre_head=%s\ncomplexity=%s' "$num" "$pre_head" "$complexity")
   [ -n "${RALPH_ISSUE_FILE:-}" ] && printf '%s\n' "$num" > "$RALPH_ISSUE_FILE"
+  if [ "$phase" = verify ]; then
+    ralph_say warn "Wznowienie po limicie: weryfikacja epicu #${num} przerwana przez limit użycia (sesja $session)."
+    ralph_verify_resume "$num" "$session"
+    exit "$RALPH_VERIFY_EXIT"
+  fi
+  RALPH_LIMIT_CONTEXT=$(printf 'issue=%s\npre_head=%s\ncomplexity=%s' "$num" "$pre_head" "$complexity")
   ralph_say warn "Wznowienie po limicie: issue #${num} — $([ "$phase" = review ] && echo "przegląd heavy" || echo worker) przerwany przez limit użycia (sesja $session)."
   issue=$(ralph_issue_text "$num")
   if [ "$phase" = review ]; then

@@ -364,7 +364,7 @@ commicie), bez względu na done-criteria o weryfikacji ręcznej — ta część 
 Odchylenia od planu idą komentarzem do epicu (brak odchyleń = brak komentarza). Epica do odbioru
 nie oznacza już worker ani samo zamknięcie ostatniego sub-issue — robi to **weryfikacja epica**.
 
-**Weryfikacja epica** (ADR 0018, warstwa 2; na razie sama bramka, bez weryfikatora-modelu). Epic jest
+**Weryfikacja epica** (ADR 0018, warstwa 2). Epic jest
 w jednym z czterech stanów (czysta funkcja `ralph_epic_state`): *niezaplanowany* (bez sub-issues —
 nie jest weryfikowany ani oznaczany), *w toku* (są otwarte sub-issues), *do weryfikacji* (≥1
 sub-issue, wszystkie zamknięte, bez `needs-human-test`) i *do odbioru* (ma `needs-human-test` —
@@ -375,25 +375,55 @@ samym przebiegu, w iteracji po zamknięciu ostatniego sub-issue. Weryfikacja lic
 Zwykłe `ralph-once` bez numeru epicu nie weryfikuje.
 
 Przebieg: bramka (`ralph-gate:`, na gałęzi `epic/<nr>`, gdy repo ma `ralph-base-branch`; log w
-`.git/ralph-logs/<czas>-weryfikacja-<nr>.log`) → komentarz-marker rundy → decyzja. Numer rundy to
-liczba markerów rund weryfikacji od ostatniego markera rundy odbioru (zostawia go `/odbior`; tu
-tylko jest rozpoznawany) plus jeden.
-- bramka zielona → `needs-human-test` i komentarz z listą odbioru (na razie kroki `## Jak odebrać` z
-  epica i komenda `cd <worktree> && claude "/odbior <nr>"`); ta sama komenda kończy wyjście
-  `ralph-epic`; kod wyjścia 9;
-- bramka czerwona w rundzie 1 → sub-issue `[ISSUE] Poprawka: czerwona bramka` (`ready-for-agent`,
-  `complexity:normal`, koniec wyjścia i ścieżka logu), kod 7 — `ralph-epic` jedzie dalej, robi
-  poprawkę i weryfikuje drugi raz;
-- bramka czerwona w rundzie 2 → `needs-human-test` z czerwoną bramką na początku listy odbioru,
-  żadnej nowej „Poprawki”.
-Po bramce weryfikacja dopisuje do tego samego logu sekcję **Dowody** z zakresu commitów epicu
-(`<baza>...epic/<nr>`): usunięte pliki testów, usunięte testy, dopisane `skip`/`todo`/`markTestSkipped`,
-spadek liczby asercji w pliku i zmienione wzorce zrzutów ekranu (obrazy w katalogach `snapshots`,
-`screenshots`, `baselines`), a gdy repo ma `vendor/bin/pest` — wynik `pest --mutate` dla klas
-zmienionych w epicu. Brak Pest albo błąd mutacji to brak tej części (jedna linia w logu), nie porażka.
-Na razie tylko log; weryfikator-model przyjdzie osobno.
-Każdy nieudany zapis na GitHubie (marker, etykieta, sub-issue) to błąd (kod 1), nie ciche
-pominięcie — bez markera weryfikacja kręciłaby się w kółko.
+`.git/ralph-logs/<czas>-weryfikacja-<nr>.log`) → dowody → **weryfikator** → komentarz-marker rundy
+→ decyzja. Numer rundy to liczba markerów rund weryfikacji od ostatniego markera rundy odbioru
+(zostawia go `/odbior`; tu tylko jest rozpoznawany) plus jeden.
+
+*Dowody* (do pliku `…-weryfikacja-<nr>-dowody.md` obok logu i do promptu weryfikatora) z zakresu
+commitów epicu (`<baza>...epic/<nr>`): usunięte pliki testów, usunięte testy, dopisane
+`skip`/`todo`/`markTestSkipped`, spadek liczby asercji w pliku i zmienione wzorce zrzutów ekranu
+(obrazy w katalogach `snapshots`, `screenshots`, `baselines`), a gdy repo ma `vendor/bin/pest` —
+wynik `pest --mutate` dla klas zmienionych w epicu. Brak Pest albo błąd mutacji to brak tej części
+(jedna linia w logu), nie porażka.
+
+*Weryfikator* (`ralph/prompt-verify.md`): Opus z effortem high, bez narzędzi edycji, uruchamiany przez
+wznawianie po limicie z fazą śladu `verify`. Dostaje PRD i `## Jak odebrać` z epicu, komentarze
+odchyleń, zakres commitów, dowody, wynik bramki i sekcję `## Ralph`. Odpala czterech subagentów
+tylko do odczytu: bezpieczeństwo, zgodność z PRD i `## Jak odebrać`, UX, architektura (wzorce repo,
+ADR-y, `CONTEXT.md`); każdą zmianę testów z dowodów musi uzasadnić PRD-em. Nie zmienia kodu i nie
+dotyka GitHuba — zwraca raport: tekst dla człowieka i na końcu blok `json` ze znaleziskami
+(`blocking` / `proposal` / `refactor`, z uzasadnieniem; dla blokujących tytuł poprawki, złożoność
+według rubryki `to-issues-ralph`, kryteria akceptacji, a dla `heavy` lista przypadków) oraz
+pozycjami listy odbioru (`not-proven`, `before-after`). Blokuje: bezpieczeństwo, odejście od PRD,
+coś, co nie działa, konkretne znalezisko architektury, zmieniony wzorzec zrzutu niezapowiedziany w
+PRD. Ogólne opinie odpadają. Koszt weryfikacji (`total_cost_usd`) jest w wyjściu runu i w logu.
+Raport bez bloku `json` albo z błędnymi polami to błąd runu (kod 1): nic nie jest zapisywane, epic
+zostaje nieoznaczony. Parsowanie (`ralph_report_parse`) i decyzja (`ralph_verify_decision`) to czyste
+funkcje.
+
+Decyzja (skrypt, nie model):
+- nic nie blokuje (bramka zielona, brak blokujących) → `needs-human-test` i komentarz z listą
+  odbioru; kod wyjścia 9;
+- runda 1 z czerwoną bramką i/lub blokującymi → sub-issues `[ISSUE] Poprawka: …` pod epicem
+  (`ready-for-agent`, `complexity:*` z raportu, dla `heavy` sekcja `## Przypadki do
+  przetestowania`; czerwona bramka dostaje własną „Poprawkę: czerwona bramka”), kod 7 —
+  `ralph-epic` jedzie dalej, robi poprawki i weryfikuje drugi raz;
+- runda 2 (i późniejsze) z czymś nadal blokującym → `needs-human-test`, nierozwiązane na początku
+  listy odbioru, żadnych nowych „Poprawek”;
+- w każdej rundzie znaleziska `refactor` → osobne `[ISSUE] Refaktor: …` (`ready-for-agent`, bez
+  rodzica, nie blokuje; issue o tym samym tytule nie jest zakładane drugi raz), a `proposal` trafia
+  tylko do listy odbioru.
+
+*Lista odbioru* (komentarz epicu): nierozwiązane znaleziska (i czerwona bramka) najpierw, kroki
+`## Jak odebrać`, czego bramka nie udowadnia, „przed / po” dla zmian wyglądu zapowiedzianych w PRD,
+propozycje do decyzji, komenda `cd <worktree> && claude "/odbior <nr>"` (ta sama kończy wyjście
+`ralph-epic`) i ID sesji weryfikatora (`claude --resume <id>`), żeby można go było dopytać.
+
+Limit użycia w trakcie weryfikatora działa jak przy workerze (ADR 0017): ślad z fazą `verify`
+(plus wynik bramki i numer rundy), czekanie na reset albo kod 8, a następne `ralph-once <epic>`
+wznawia tę samą sesję bez ponownej bramki — ślad jest nieważny, gdy epic jest zamknięty albo ma już
+`needs-human-test`. Każdy nieudany zapis na GitHubie (marker, etykieta, sub-issue) to błąd (kod 1),
+nie ciche pominięcie — bez markera weryfikacja kręciłaby się w kółko.
 
 **Odbiór epicu.** `needs-human-test` na epicu to bezpiecznik: dopóki jest, pętla nie zaczyna nowej
 pracy. Przechodzisz scenariusz z `## Jak odebrać` i:
@@ -429,11 +459,11 @@ runie, nie z wyniku procesu workera):
 | 4 | run AFK zostawił issue otwarte bez `ready-for-agent` (odkryty HITL) |
 | 5 | sesja HITL skończona, issue otwarte i bez `ready-for-agent` (nierozwiązane) |
 | 6 | sesja HITL skończona, issue otwarte z przywróconym `ready-for-agent` (wraca do AFK) |
-| 7 | przegląd heavy odrzucił issue albo bramka była czerwona pierwszy raz: otwarte ponownie z uwagami, poprawka w następnym runie; także weryfikacja epica z czerwoną bramką w rundzie 1 (założona „Poprawka”) |
+| 7 | przegląd heavy odrzucił issue albo bramka była czerwona pierwszy raz: otwarte ponownie z uwagami, poprawka w następnym runie; także weryfikacja epica z czerwoną bramką albo blokującymi znaleziskami w rundzie 1 (założone „Poprawki”) |
 | 8 | limit użycia przerwał run, a reset jest dalej niż 6 h; ślad zostaje do wznowienia (niżej) |
 | 9 | weryfikacja epica oddała epic do odbioru (`needs-human-test` i lista odbioru ustawione); `ralph-epic` staje jak przy epicu gotowym do odbioru |
 
-**Wznowienie po limicie użycia** (tylko Claude, ADR 0017). Gdy worker albo przegląd heavy trafi
+**Wznowienie po limicie użycia** (tylko Claude, ADR 0017). Gdy worker, przegląd heavy albo weryfikator epicu trafi
 na wyczerpany limit konta (np. pięciogodzinne okno w nocy), to nie jest porażka. Ralph zapisuje
 ślad w `.git/ralph-limit` (issue, faza, sesja, gałąź, godzina resetu), a jeśli reset wypada
 w ciągu 6 h, wysyła powiadomienie „czekam do HH:MM”, śpi według zegara ściennego i wznawia tę
@@ -441,7 +471,7 @@ samą sesję (`claude -p --resume <id>`) z poleceniem kontynuacji — w tej same
 `ralph-epic`. Strażnik i selektor po prostu czekają i powtarzają wywołanie. Gdy proces zginie
 w trakcie czekania (laptop wyłączony), rano uruchamiasz to samo co wieczorem (`ralph-epic 45`,
 `ralph-once 52` albo `ralph-once`): ślad jest ważny, gdy issue jest w stanie z chwili przerwania
-(worker: otwarte z `ready-for-agent`; przegląd: zamknięte) i bieżąca gałąź jest ta sama. Wtedy
+(worker: otwarte z `ready-for-agent`; przegląd: zamknięte; weryfikator: epic otwarty i bez `needs-human-test`) i bieżąca gałąź jest ta sama. Wtedy
 brudne drzewo nie blokuje, a Ralph wznawia sesję przed bramkami i strażnikiem. Nieważny ślad
 znika z jedną linią na ekranie; ślad innego issue zostaje nietknięty, a ślad po wycofanym Codeksie jest usuwany. Gdy Claude
 nie podejmie sesji, run kończy się błędem z komunikatem, a ślad zostaje (usuń go, żeby wrócić do
