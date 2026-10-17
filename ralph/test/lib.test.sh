@@ -159,6 +159,8 @@ printf '%s\n' "$@" > "$CLAUDE_ARGV_CAPTURE"
 FAKE_CLAUDE
 chmod +x "$fake_hc_dir/bin/claude"
 (
+  # A worker running these tests inherits RALPH_TERM_FDS=1 from its run log, without fds 3/4.
+  unset RALPH_TERM_FDS
   PATH="$fake_hc_dir/bin:$PATH"
   CLAUDE_ARGV_CAPTURE="$fake_hc_dir/worker.argv"
   export CLAUDE_ARGV_CAPTURE
