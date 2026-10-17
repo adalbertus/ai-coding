@@ -386,6 +386,12 @@ tylko jest rozpoznawany) plus jeden.
   poprawkę i weryfikuje drugi raz;
 - bramka czerwona w rundzie 2 → `needs-human-test` z czerwoną bramką na początku listy odbioru,
   żadnej nowej „Poprawki”.
+Po bramce weryfikacja dopisuje do tego samego logu sekcję **Dowody** z zakresu commitów epicu
+(`<baza>...epic/<nr>`): usunięte pliki testów, usunięte testy, dopisane `skip`/`todo`/`markTestSkipped`,
+spadek liczby asercji w pliku i zmienione wzorce zrzutów ekranu (obrazy w katalogach `snapshots`,
+`screenshots`, `baselines`), a gdy repo ma `vendor/bin/pest` — wynik `pest --mutate` dla klas
+zmienionych w epicu. Brak Pest albo błąd mutacji to brak tej części (jedna linia w logu), nie porażka.
+Na razie tylko log; weryfikator-model przyjdzie osobno.
 Każdy nieudany zapis na GitHubie (marker, etykieta, sub-issue) to błąd (kod 1), nie ciche
 pominięcie — bez markera weryfikacja kręciłaby się w kółko.
 

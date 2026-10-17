@@ -1381,6 +1381,71 @@ rm -rf "$fake_lim"
 expect_eq "decision: 8 (usage limit) -> stop-usage-limit" "$(dec 8 1 5 false)" "stop-usage-limit"
 expect_eq "decision: usage limit is not masked by a ready epic" "$(dec 8 1 5 true)" "stop-usage-limit"
 
+# --- Evidence for the verification (ralph_evidence*): a fixture repo with an epic branch. ---
+ev_repo=$(mktemp -d)
+(
+  cd "$ev_repo" && git init -q -b main && git config user.email t@t && git config user.name t
+  printf '# T\n\n## Ralph\n\nralph-base-branch: main\nralph-gate: true\n' > CLAUDE.md
+  mkdir -p tests/snapshots app/Models vendor/bin
+  printf '<?php\nit("a", function () {\n    expect(1)->toBe(1);\n    expect(2)->toBe(2);\n});\n\ntest("b", function () {\n    expect(3)->toBe(3);\n});\n' > tests/BarTest.php
+  printf '<?php\nit("gone", function () { expect(1)->toBe(1); });\n' > tests/FooTest.php
+  printf '<?php\nit("ok", function () {\n    $this->assertTrue(true);\n});\n' > tests/KeepTest.php
+  printf 'old' > tests/snapshots/home.png
+  printf 'old' > tests/snapshots/gone.png
+  printf '<?php\nnamespace App\\Models;\nclass Old {}\n' > app/Models/Old.php
+  git add -A && git commit -qm base
+  git checkout -q -b epic/7
+  git rm -q tests/FooTest.php tests/snapshots/gone.png
+  printf '<?php\nit("a", function () {\n    expect(1)->toBe(1);\n})->skip();\n\ntodo("later");\n' > tests/BarTest.php
+  printf '<?php\nit("ok", function () {\n    $this->assertTrue(true);\n    $this->assertFalse(false);\n});\n' > tests/KeepTest.php
+  printf 'new' > tests/snapshots/home.png
+  printf 'new' > tests/snapshots/fresh.png
+  printf '<?php\nnamespace App\\Models;\nclass User {}\n' > app/Models/User.php
+  printf 'x' > README.md
+  git add -A && git commit -qm epic
+)
+ev_diff=$(cd "$ev_repo" && git diff -U0 --no-color main...epic/7)
+expect_eq "evidence: deleted test file recognised (and a deleted image is not one)" \
+  "$(ralph_evidence_scan deleted-file <<<"$ev_diff")" "tests/FooTest.php"
+expect_eq "evidence: removed test declaration recognised, in a kept file only" \
+  "$(ralph_evidence_scan removed-test <<<"$ev_diff")" 'tests/BarTest.php: test("b", function () {'
+expect_eq "evidence: added skip and todo recognised" \
+  "$(ralph_evidence_scan added-skip <<<"$ev_diff")" $'tests/BarTest.php: })->skip();\ntests/BarTest.php: todo("later");'
+expect_eq "evidence: assertion count drop only where fewer were added than removed" \
+  "$(ralph_evidence_scan assertion-drop <<<"$ev_diff")" "tests/BarTest.php: 2 -> 0"
+expect_eq "evidence: screenshot patterns changed, added and deleted" \
+  "$(ralph_evidence_scan screenshot <<<"$ev_diff" | sort | paste -sd, -)" \
+  "dodany tests/snapshots/fresh.png,usunięty tests/snapshots/gone.png,zmieniony tests/snapshots/home.png"
+expect_eq "evidence: a non-test change is no finding" \
+  "$(printf 'diff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n@@ -1 +1 @@\n-it("x", f)\n+skip()\n' | ralph_evidence_report | grep -c 'brak')" "5"
+expect_eq "evidence: classes from changed non-test php files (FQCN), tests skipped" \
+  "$(cd "$ev_repo" && git checkout -q epic/7 && ralph_epic_changed_files 7 | ralph_evidence_changed_classes | paste -sd, -)" 'App\Models\User'
+
+# Mutations: only with Pest, only on the changed classes.
+cat > "$ev_repo/vendor/bin/pest" <<'PEST'
+#!/usr/bin/env bash
+echo "$*" >> "$PEST_ARGS"
+if [ -n "${PEST_BROKEN:-}" ]; then echo "Fatal: no coverage driver"; exit 2; fi
+echo "Mutations: 1 survived, 4 tested"; exit 1
+PEST
+chmod +x "$ev_repo/vendor/bin/pest"
+export PEST_ARGS="$ev_repo/pest-args"
+ev_out=$(cd "$ev_repo" && ralph_evidence 7 2>&1)
+expect_eq "evidence: pest --mutate runs once, on the changed class only" \
+  "$(cat "$PEST_ARGS")" '--mutate --class=App\Models\User'
+expect_eq "  the section holds the mutation report and the diff findings" \
+  "$(grep -c 'Mutations: 1 survived' <<<"$ev_out")|$(grep -c 'tests/FooTest.php' <<<"$ev_out")" "1|1"
+: > "$PEST_ARGS"
+ev_out=$(cd "$ev_repo" && PEST_BROKEN=1 ralph_evidence 7 2>&1)
+expect_eq "evidence: a pest failure -> mutation part skipped with one line, the rest stays" \
+  "$(grep -c 'pomijam' <<<"$ev_out")|$(grep -c 'Mutacje' <<<"$ev_out")|$(grep -c 'tests/FooTest.php' <<<"$ev_out")" "1|0|1"
+rm "$ev_repo/vendor/bin/pest"; : > "$PEST_ARGS"
+ev_out=$(cd "$ev_repo" && ralph_evidence 7 2>&1)
+expect_eq "evidence: no Pest -> no mutation part, no pest call, no failure" \
+  "$(grep -c 'Mutacje' <<<"$ev_out")|$(wc -c < "$PEST_ARGS" | tr -d ' ')" "0|0"
+expect_eq "evidence: epic without a branch -> empty section" "$(cd "$ev_repo" && ralph_evidence 99)" ""
+rm -rf "$ev_repo"; unset PEST_ARGS
+
 echo
 echo "Wynik: $pass OK, $fail FAIL"
 [ "$fail" = 0 ]

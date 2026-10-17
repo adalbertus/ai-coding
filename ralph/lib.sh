@@ -987,16 +987,145 @@ ralph_flaky_parent() {
   return 0
 }
 
-# Files changed in the commits of epic $1 (base..epic/$1). Nothing when the repo declares no base
+# The git range of the commits of epic $1 (base...epic/$1). Nothing when the repo declares no base
 # branch or the epic branch does not exist.
-ralph_epic_changed_files() {
+ralph_epic_range() {
   local epic="$1" root base
   [ -n "$epic" ] || return 0
   root=$(git rev-parse --show-toplevel 2>/dev/null) || return 0
   base=$(ralph_contract_section "$root/$(ralph_contract_file)" 2>/dev/null | ralph_base_branch 2>/dev/null) || return 0
   [ -n "$base" ] || return 0
   git rev-parse --verify --quiet "refs/heads/epic/$epic" >/dev/null || return 0
-  git diff --name-only "$base...epic/$epic" 2>/dev/null || true
+  printf '%s...epic/%s\n' "$base" "$epic"
+}
+
+# Files changed in the commits of epic $1. Nothing when ralph_epic_range finds no range.
+ralph_epic_changed_files() {
+  local range
+  range=$(ralph_epic_range "$1") || return 0
+  [ -n "$range" ] || return 0
+  git diff --name-only "$range" 2>/dev/null || true
+}
+
+# --- Evidence for the verification: what the epic's commits did to the tests. ---
+# Pure scanners over a zero-context unified diff (stdin, `git diff -U0`). A file counts as a test
+# when its path has a tests/spec directory or a Test/_test/.test/.spec name. Mode (arg 1) picks the
+# finding, each printed as one line:
+#   deleted-file   path of a deleted test file
+#   removed-test   path: a removed test declaration (it(, test(, function test*, def test_, #[Test])
+#   added-skip     path: an added skip/todo/markTestSkipped/markTestIncomplete line
+#   assertion-drop path: assertion lines removed -> added, only when fewer were added than removed
+#   screenshot     status path: an added/deleted/changed image under a screenshot-baseline directory
+ralph_evidence_scan() {
+  awk -v mode="$1" '
+    function istest(f) {
+      if (tolower(f) ~ /\.(png|jpe?g|webp|gif)$/) return 0
+      return f ~ /(^|\/)(tests?|spec|specs|__tests__)\// || f ~ /(Test|Tests)\.[A-Za-z]+$/ || f ~ /[._-](test|spec)\.[A-Za-z]+$/ || f ~ /_test\.[A-Za-z]+$/
+    }
+    function isshot(f) {
+      return tolower(f) ~ /\.(png|jpe?g|webp|gif)$/ && tolower(f) ~ /(snapshots?|screenshots?|baselines?|__image_snapshots__)\//
+    }
+    function flush() {
+      if (mode == "assertion-drop" && file != "" && istest(file) && !deleted && rem > add) print file ": " rem " -> " add
+      if (mode == "screenshot" && file != "" && isshot(file)) print (deleted ? "usunięty" : (created ? "dodany" : "zmieniony")) " " file
+    }
+    /^diff --git / {
+      flush()
+      file = $0; sub(/^.* b\//, "", file)
+      deleted = 0; created = 0; rem = 0; add = 0; hunk = 0
+      next
+    }
+    /^deleted file mode/ { deleted = 1; if (mode == "deleted-file" && istest(file)) print file; next }
+    /^new file mode/ { created = 1; next }
+    /^@@/ { hunk = 1; next }
+    hunk && /^-/ && istest(file) && !deleted {
+      line = substr($0, 2)
+      if (line ~ /(^|[^A-Za-z_])(it|test|describe)(\.each)?[ (]*\(|function[ \t]+test[A-Za-z0-9_]*[ \t]*\(|def test_|#\[Test\]|@Test/ && mode == "removed-test") {
+        gsub(/^[ \t]+/, "", line); print file ": " line
+      }
+      if (line ~ /expect\(|assert[A-Za-z_]*[ (]|->assert[A-Za-z]*\(/) rem++
+      next
+    }
+    hunk && /^\+/ && istest(file) {
+      line = substr($0, 2)
+      if (mode == "added-skip" && line ~ /(^|[^A-Za-z_])(skip|todo)\(|markTestSkipped|markTestIncomplete|(^|[^A-Za-z_])(xit|xdescribe|xtest)\(|pytest\.mark\.skip|unittest\.skip|#\[Skip/) {
+        gsub(/^[ \t]+/, "", line); print file ": " line
+      }
+      if (line ~ /expect\(|assert[A-Za-z_]*[ (]|->assert[A-Za-z]*\(/) add++
+      next
+    }
+    END { flush() }
+  '
+}
+
+# Pure. $1: heading, $2: findings (one per line; empty = none) -> one subsection of the report.
+ralph_evidence_block() {
+  printf '### %s\n\n' "$1"
+  if [ -n "$2" ]; then sed 's/^/- /' <<<"$2"; else echo "- brak"; fi
+  echo
+}
+
+# Pure. stdin: the diff of the epic's commits (`git diff -U0`) -> the diff part of the "Dowody" section.
+ralph_evidence_report() {
+  local diff
+  diff=$(cat)
+  ralph_evidence_block "Usunięte pliki testów" "$(ralph_evidence_scan deleted-file <<<"$diff")"
+  ralph_evidence_block "Usunięte testy" "$(ralph_evidence_scan removed-test <<<"$diff")"
+  ralph_evidence_block "Dopisane skip/todo/markTestSkipped" "$(ralph_evidence_scan added-skip <<<"$diff")"
+  ralph_evidence_block "Spadek liczby asercji w pliku (usunięte -> dodane)" "$(ralph_evidence_scan assertion-drop <<<"$diff")"
+  ralph_evidence_block "Zmienione wzorce zrzutów ekranu" "$(ralph_evidence_scan screenshot <<<"$diff")"
+}
+
+# Pure. stdin: file paths (changed in the epic) -> the PHP classes among them that are not tests,
+# one fully qualified name per line, read from the files in cwd (namespace + file name).
+ralph_evidence_changed_classes() {
+  local f ns
+  while IFS= read -r f; do
+    case "$f" in *.php) ;; *) continue ;; esac
+    ralph_evidence_is_test_path "$f" && continue
+    [ -f "$f" ] || continue
+    ns=$(sed -n 's/^namespace[[:space:]]\{1,\}\([^;[:space:]]*\).*/\1/p' "$f" | head -1)
+    f=$(basename "$f" .php)
+    if [ -n "$ns" ]; then printf '%s\\%s\n' "$ns" "$f"; else printf '%s\n' "$f"; fi
+  done
+}
+
+# Pure. $1: path -> rc 0 when it is a test file (the same rule ralph_evidence_scan uses).
+ralph_evidence_is_test_path() {
+  [[ "$(printf %s "$1" | tr A-Z a-z)" =~ \.(png|jpe?g|webp|gif)$ ]] && return 1
+  [[ "$1" =~ (^|/)(tests?|spec|specs|__tests__)/ || "$1" =~ (Test|Tests)\.[A-Za-z]+$ || "$1" =~ [._-](test|spec)\.[A-Za-z]+$ || "$1" =~ _test\.[A-Za-z]+$ ]]
+}
+
+# `pest --mutate` limited to the classes changed in epic $1, when the repo (cwd) has Pest. Prints
+# the mutation part of the "Dowody" section, or nothing. No Pest, no changed classes, or a run that
+# produced no mutation report (a crash, a missing driver) is a part that is missing, not a failure:
+# one line says so on stderr. A non-zero exit with a report is a finding (surviving mutants).
+ralph_evidence_mutations() {
+  local epic="$1" classes class out rc report="" bin=vendor/bin/pest
+  [ -x "$bin" ] || return 0
+  classes=$(ralph_epic_changed_files "$epic" | ralph_evidence_changed_classes)
+  [ -n "$classes" ] || return 0
+  while IFS= read -r class; do
+    out=$("$bin" --mutate "--class=$class" </dev/null 2>&1)
+    rc=$?
+    if ! grep -qi 'mutation' <<<"$out"; then
+      ralph_say warn "⚠ pest --mutate dla ${class} nie zwrócił raportu (kod ${rc}) — pomijam tę część dowodów." >&2
+      continue
+    fi
+    report+="#### ${class} (kod ${rc})"$'\n\n````\n'"$(tail -n 30 <<<"$out")"$'\n````\n\n'
+  done <<<"$classes"
+  [ -z "$report" ] || printf '### Mutacje (pest --mutate, klasy zmienione w epicu)\n\n%s' "$report"
+}
+
+# The whole "Dowody" section for epic $1, in cwd: the diff scanners over base...epic/$1, then the
+# mutations. Nothing when the epic has no range (no base branch or no epic branch).
+ralph_evidence() {
+  local epic="$1" range
+  range=$(ralph_epic_range "$epic") || return 0
+  [ -n "$range" ] || return 0
+  printf '## Dowody (epic #%s, %s)\n\n' "$epic" "$range"
+  git diff -U0 --no-color "$range" 2>/dev/null | ralph_evidence_report
+  ralph_evidence_mutations "$epic"
 }
 
 # Called after a red gate turned green on a rerun. $1: the issue the run closed, $2: the red run's
@@ -1242,6 +1371,7 @@ ralph_verify_epic() {
     ralph_say err "✗ Bramka czerwona (kod ${rc}, $((SECONDS - start)) s). Log: $log"
   fi
   tail_out=$(ralph_gate_tail "$log")
+  ralph_evidence "$epic" >>"$log" 2>&1
 
   if ! gh issue comment "$epic" --body "${RALPH_VERIFY_MARKER}
 Weryfikacja epicu: runda ${round}, bramka $([ "$rc" = 0 ] && echo zielona || echo "czerwona (kod ${rc})"). Log: ${log}" >/dev/null 2>&1; then
