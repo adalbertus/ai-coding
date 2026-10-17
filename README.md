@@ -7,7 +7,8 @@ Globalne narzędzia do pracy z agentami kodującymi w **jednym wątku na repo**:
 - **Współdzielony Ralph** — jedna autonomiczna pętla implementacyjna dla wszystkich repo,
   niezależnie od stacku. Specyfika repo (jak testować, kiedy „gotowe") siedzi w sekcji
   `## Ralph` w `CLAUDE.md` repo, a nie w kopii skryptu. Ralph działa wyłącznie w Claude.
-- **Skille Ralpha** — `ralph-konfiguracja` (setup repo) i `to-issues-ralph` (triage zadań).
+- **Skille Ralpha** — `ralph-konfiguracja` (setup repo), `to-issues-ralph` (triage zadań) i `/odbior <nr>`
+  (odbiór epicu w artefakcie claude.ai).
 
 Design: `CONTEXT.md` (słownik), `docs/adr/0001` (warstwowy fallback `/podsumuj`),
 `docs/adr/0002` (współdzielony Ralph: prompty agnostyczne + config w CLAUDE.md),
@@ -28,7 +29,7 @@ cd ~/projects/ai-coding
 Instalator jest **samolokujący** (działa z dowolnego katalogu), **najpierw pyta o zgodę**
 i **idempotentny** (ponowne uruchomienie nie psuje poprawnych symlinków). Tworzy:
 
-- skille Claude → `~/.claude/skills`: `ralph-konfiguracja`, `to-issues-ralph`
+- skille Claude → `~/.claude/skills`: `ralph-konfiguracja`, `to-issues-ralph`, `odbior` (tylko Claude)
 - skille Codex → `${CODEX_HOME:-~/.codex}/skills`: te same nazwy, wołane w Codexie jako `$...`
 - launchery → `~/.local/bin`: `ralph-once`, `ralph-once-local`, `ralph-epic`
 
@@ -424,6 +425,14 @@ Limit użycia w trakcie weryfikatora działa jak przy workerze (ADR 0017): ślad
 wznawia tę samą sesję bez ponownej bramki — ślad jest nieważny, gdy epic jest zamknięty albo ma już
 `needs-human-test`. Każdy nieudany zapis na GitHubie (marker, etykieta, sub-issue) to błąd (kod 1),
 nie ciche pominięcie — bez markera weryfikacja kręciłaby się w kółko.
+
+**`/odbior <nr>`** (Opus, tylko Claude) czyta najnowszą listę odbioru z komentarza epicu i publikuje
+artefakt claude.ai z `db` i `assets`: każdy krok z opisem, przyciski OK / do poprawki, komentarz,
+wklejenie zrzutu, uwagi ogólne; stan jest trwały między sesjami przeglądarki, per runda i krok.
+Jeden artefakt na epic — jego URL leży w komentarzu epicu (marker `ralph-odbior-artefakt`) i jest
+używany ponownie; ponowne `/odbior` dla tej samej rundy niczego nie nadpisuje, nowa runda dodaje
+sekcję nad starymi. Strona to szablon `skills/odbior/template.html`, treść kroków trafia do bazy
+artefaktu. Czytanie wyników, poprawki i zamknięcie epicu to osobne zadania (jeszcze nie ma).
 
 **Odbiór epicu.** `needs-human-test` na epicu to bezpiecznik: dopóki jest, pętla nie zaczyna nowej
 pracy. Przechodzisz scenariusz z `## Jak odebrać` i:

@@ -1657,6 +1657,21 @@ expect_eq "evidence: no Pest -> no mutation part, no pest call, no failure" \
 expect_eq "evidence: epic without a branch -> empty section" "$(cd "$ev_repo" && ralph_evidence 99)" ""
 rm -rf "$ev_repo"; unset PEST_ARGS
 
+# --- /odbior skill: structure the artifact page and installer rely on ---
+ODB="$SCRIPT_DIR/../../skills/odbior"
+expect_eq "odbior: SKILL.md header names Opus and the skill" \
+  "$(sed -n '1,/^---$/p;' "$ODB/SKILL.md" | sed -n '2,12p' | grep -c -E '^(name: odbior|model: opus)$')" "2"
+expect_eq "odbior: description is English (no Polish diacritics)" \
+  "$(grep '^description:' "$ODB/SKILL.md" | grep -c '[ąćęłńóśźż]')" "0"
+expect_ok "odbior: page template exists" test -s "$ODB/template.html"
+for odb_pat in 'window\.db' 'window\.assets' 'state:\$\{roundId\}' 'notes:\$\{round\.id\}' 'width=device-width'; do
+  expect_ok "odbior: template contains $odb_pat" grep -q -E "$odb_pat" "$ODB/template.html"
+done
+expect_eq "odbior: SKILL.md keeps state when the round exists and prepends new rounds" \
+  "$(grep -c -E 'do not touch it|prepend' "$ODB/SKILL.md")" "2"
+expect_eq "odbior: install.sh links it for Claude" \
+  "$(grep -c '^CLAUDE_ONLY_SKILLS=(odbior)' "$SCRIPT_DIR/../../install.sh")" "1"
+
 echo
 echo "Wynik: $pass OK, $fail FAIL"
 [ "$fail" = 0 ]

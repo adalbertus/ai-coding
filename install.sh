@@ -11,6 +11,8 @@ PLUGIN_MARKETPLACE="$SCRIPT_DIR/.agents/plugins/marketplace.json"
 
 # zapisz, podsumuj, sesja, sesja-konfiguracja zostają w skills/, ale nie są linkowane (nieużywane).
 SKILLS=(ralph-konfiguracja to-issues-ralph)
+# Tylko Claude (artefakty claude.ai nie istnieją w Codexie).
+CLAUDE_ONLY_SKILLS=(odbior)
 # launcher:ścieżka-względna-do-skryptu — globalny launcher symlinkuje do skryptu w repo.
 # Skrypty samolokują prompty przez realpath, więc działają z dowolnego repo (cwd).
 LAUNCHERS=("ralph-once:ralph/once.sh" "ralph-once-local:ralph/once-local.sh" "ralph-epic:ralph/epic.sh")
@@ -58,7 +60,7 @@ make_link() {
 # 1. Skille → native skills dirs
 echo "Skille Claude:"
 mkdir -p "$CLAUDE_SKILLS_DIR"
-for name in "${SKILLS[@]}"; do
+for name in "${SKILLS[@]}" "${CLAUDE_ONLY_SKILLS[@]}"; do
   make_link "$SCRIPT_DIR/skills/$name" "$CLAUDE_SKILLS_DIR/$name" "$name"
 done
 
@@ -81,7 +83,7 @@ done
 
 echo
 echo "Gotowe (to instalujesz RAZ, globalnie — nie trzeba powtarzać per repo)."
-echo "  Skille Claude: /ralph-konfiguracja, /to-issues-ralph"
+echo "  Skille Claude: /ralph-konfiguracja, /to-issues-ralph, /odbior"
 echo "  Skille Codex:  \$ralph-konfiguracja, \$to-issues-ralph (tylko skille; Ralpha konfigurujesz i uruchamiasz w Claude)"
 echo "  Launchery: ralph-once, ralph-once-local, ralph-epic (wymagają $BIN_DIR w PATH)"
 if [ -f "$PLUGIN_MARKETPLACE" ]; then

@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Odbiór epicu</title>
+<style>
+  :root { --bg:#f6f6f4; --card:#fff; --fg:#1d1d1b; --mute:#6b6b66; --ok:#1a7f37; --fix:#b42318; --line:#dcdcd6; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#161615; --card:#222220; --fg:#ececea; --mute:#a0a09a; --ok:#4cc26a; --fix:#ff7b72; --line:#3a3a36; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.45 system-ui, sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 12px; }
+  h1 { font-size: 1.25rem; margin: 8px 0 12px; }
+  h2 { font-size: 1.05rem; margin: 20px 0 8px; }
+  details.round { margin: 12px 0; }
+  details.round > summary { font-weight: 600; cursor: pointer; padding: 8px 0; }
+  .step { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px; margin:10px 0; }
+  .step.ok { border-left:5px solid var(--ok); }
+  .step.fix { border-left:5px solid var(--fix); }
+  .kind { font-size:.75rem; color:var(--mute); text-transform:uppercase; letter-spacing:.04em; }
+  .step h3 { margin:2px 0 6px; font-size:1rem; }
+  .label { color:var(--mute); font-size:.85rem; margin-top:6px; }
+  .btns { display:flex; gap:8px; margin:10px 0; }
+  .btns button { flex:1; min-height:44px; font-size:1rem; border-radius:8px; border:1px solid var(--line); background:var(--card); color:var(--fg); }
+  .btns button.on.ok { background:var(--ok); color:#fff; border-color:var(--ok); }
+  .btns button.on.fix { background:var(--fix); color:#fff; border-color:var(--fix); }
+  textarea { width:100%; min-height:64px; font:inherit; color:inherit; background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:8px; }
+  .shots { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
+  .shots img { max-width:100%; width:160px; border-radius:6px; border:1px solid var(--line); }
+  .paste { margin-top:6px; font-size:.85rem; color:var(--mute); }
+  .paste input { max-width:100%; }
+  .saved { color:var(--mute); font-size:.8rem; }
+  #err { color:var(--fix); }
+</style>
+</head>
+<body>
+<main>
+  <h1 id="title">Odbiór epicu</h1>
+  <div id="err"></div>
+  <div id="rounds"></div>
+</main>
+<script>
+// ---- Thin adapter over the artifact runtime. Adjust ONLY here if the db/assets API differs. ----
+const store = {
+  get: async (key) => { const v = await window.db.get(key); return v === undefined ? null : v; },
+  set: async (key, value) => window.db.set(key, value),
+};
+// Takes a File/Blob (pasted or picked image), returns its URL.
+const uploadAsset = async (file) => window.assets.upload(file);
+// -------------------------------------------------------------------------------------------------
+
+const KIND = { unresolved:'Nierozwiązane', step:'Krok', 'not-proven':'Czego bramka nie dowodzi',
+               'before-after':'Przed / po', proposal:'Propozycja do decyzji' };
+const el = (tag, props = {}, ...kids) => {
+  const n = Object.assign(document.createElement(tag), props);
+  kids.flat().forEach(k => n.append(k));
+  return n;
+};
+const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
+
+async function renderStep(roundId, step) {
+  const key = `state:${roundId}:${step.id}`;
+  const st = (await store.get(key)) || { status: null, comment: '', shots: [] };
+  const box = el('div', { className: 'step' });
+  const saved = el('span', { className: 'saved' });
+  const persist = async () => {
+    await store.set(key, st);
+    box.className = 'step' + (st.status ? ' ' + st.status : '');
+    saved.textContent = 'zapisano';
+  };
+  const okBtn = el('button', { textContent: 'OK' });
+  const fixBtn = el('button', { textContent: 'Do poprawki' });
+  const paint = () => {
+    okBtn.className = 'ok' + (st.status === 'ok' ? ' on' : '');
+    fixBtn.className = 'fix' + (st.status === 'fix' ? ' on' : '');
+  };
+  const pick = (s) => async () => { st.status = st.status === s ? null : s; paint(); await persist(); };
+  okBtn.onclick = pick('ok'); fixBtn.onclick = pick('fix'); paint();
+
+  const comment = el('textarea', { value: st.comment, placeholder: 'Komentarz (opcjonalnie)' });
+  comment.oninput = debounce(async () => { st.comment = comment.value; await persist(); }, 500);
+
+  const shots = el('div', { className: 'shots' });
+  const showShot = (url) => shots.append(el('img', { src: url, alt: 'zrzut' }));
+  st.shots.forEach(showShot);
+  const addShot = async (file) => {
+    if (!file) return;
+    try { const url = await uploadAsset(file); st.shots.push(url); showShot(url); await persist(); }
+    catch (e) { document.getElementById('err').textContent = 'Nie udało się dodać zrzutu: ' + e.message; }
+  };
+  const picker = el('input', { type: 'file', accept: 'image/*' });
+  picker.onchange = () => addShot(picker.files[0]);
+  comment.addEventListener('paste', (e) => {
+    const f = [...(e.clipboardData?.files || [])].find(x => x.type.startsWith('image/'));
+    if (f) { e.preventDefault(); addShot(f); }
+  });
+
+  box.className = 'step' + (st.status ? ' ' + st.status : '');
+  box.append(
+    el('div', { className: 'kind', textContent: KIND[step.kind] || step.kind || '' }),
+    el('h3', { textContent: step.title }),
+    el('div', { className: 'label', textContent: 'Co zrobić' }), el('div', { textContent: step.do }),
+    el('div', { className: 'label', textContent: 'Czego oczekiwać' }), el('div', { textContent: step.expect }),
+    el('div', { className: 'btns' }, okBtn, fixBtn),
+    comment, shots,
+    el('div', { className: 'paste' }, 'Zrzut: wklej w komentarzu albo wybierz plik ', picker),
+    saved,
+  );
+  return box;
+}
+
+async function renderRound(round, open) {
+  const sec = el('details', { className: 'round', open });
+  sec.append(el('summary', { textContent: round.label }));
+  for (const step of round.steps) sec.append(await renderStep(round.id, step));
+  const nkey = `notes:${round.id}`;
+  const notes = el('textarea', { value: (await store.get(nkey)) || '', placeholder: 'Uwagi ogólne do tej rundy' });
+  notes.oninput = debounce(() => store.set(nkey, notes.value), 500);
+  sec.append(el('h2', { textContent: 'Uwagi ogólne' }), notes);
+  return sec;
+}
+
+(async () => {
+  try {
+    const epic = await store.get('epic');
+    if (epic) document.getElementById('title').textContent = `Odbiór epicu #${epic.number}: ${epic.title}`;
+    const rounds = (await store.get('rounds')) || [];
+    const root = document.getElementById('rounds');
+    if (!rounds.length) root.textContent = 'Brak rund — uruchom /odbior w sesji Claude.';
+    for (let i = 0; i < rounds.length; i++) root.append(await renderRound(rounds[i], i === 0));
+  } catch (e) {
+    document.getElementById('err').textContent = 'Błąd: ' + e.message;
+  }
+})();
+</script>
+</body>
+</html>
