@@ -948,6 +948,86 @@ ralph_gate_fail_count() {
     || echo 0
 }
 
+# --- Niestabilny test: czerwona bramka, po powtórzeniu zielona. ---
+
+# Pure. stdin: a red gate's output -> the identifier of the failing test, when a known runner
+# format shows one (TAP `not ok 3 - name`, `✗ name`, `FAIL: name`, `--- FAIL: name`, `FAILED
+# path::name`); first match wins. Nothing printed (rc 1) when the output names none.
+ralph_flaky_test_name() {
+  local line name
+  while IFS= read -r line; do
+    line="${line%$'\r'}"
+    name=""
+    if [[ "$line" =~ ^not\ ok\ +[0-9]+\ +-?\ *(.+)$ ]]; then name="${BASH_REMATCH[1]}"
+    elif [[ "$line" =~ ^(✗|✘|×)\ +(.+)$ ]]; then name="${BASH_REMATCH[2]}"
+    elif [[ "$line" =~ ^---\ FAIL:\ +([^[:space:]]+) ]]; then name="${BASH_REMATCH[1]}"
+    elif [[ "$line" =~ ^FAILED?:?\ +(.+)$ ]]; then name="${BASH_REMATCH[1]}"
+    fi
+    name="${name%"${name##*[![:space:]]}"}"
+    if [ -n "$name" ]; then printf '%s\n' "$name"; return 0; fi
+  done
+  return 1
+}
+
+# Pure. $1: epic number (empty = the issue has none), $2: files changed in the epic's commits
+# (one per line), stdin: a red gate's output. Prints the epic number when a test file named in the
+# output (a path with test or spec in it) is among the changed files; otherwise nothing — the
+# flaky-test issue then has no parent (also when the output names no file).
+ralph_flaky_parent() {
+  local epic="$1" changed="$2" tok f
+  [ -n "$epic" ] && [ -n "$changed" ] || return 0
+  while IFS= read -r tok; do
+    tok="${tok#./}"
+    while IFS= read -r f; do
+      [ -n "$f" ] || continue
+      if [ "$tok" = "$f" ] || [[ "$tok" == */"$f" ]]; then printf '%s\n' "$epic"; return 0; fi
+    done <<<"$changed"
+  done < <(grep -oE '[A-Za-z0-9_./-]*(test|spec)[A-Za-z0-9_./-]*\.[A-Za-z0-9]+' || true)
+  return 0
+}
+
+# Files changed in the commits of epic $1 (base..epic/$1). Nothing when the repo declares no base
+# branch or the epic branch does not exist.
+ralph_epic_changed_files() {
+  local epic="$1" root base
+  [ -n "$epic" ] || return 0
+  root=$(git rev-parse --show-toplevel 2>/dev/null) || return 0
+  base=$(ralph_contract_section "$root/$(ralph_contract_file)" 2>/dev/null | ralph_base_branch 2>/dev/null) || return 0
+  [ -n "$base" ] || return 0
+  git rev-parse --verify --quiet "refs/heads/epic/$epic" >/dev/null || return 0
+  git diff --name-only "$base...epic/$epic" 2>/dev/null || true
+}
+
+# Called after a red gate turned green on a rerun. $1: the issue the run closed, $2: the red run's
+# log, $3: the gate command. Opens `[ISSUE] Niestabilny test: <name>` (complexity:normal,
+# ready-for-agent), under the epic of issue $1 when the red output names a test file the epic changed.
+ralph_report_flaky_test() {
+  local num="$1" red_log="$2" cmd="$3" name parent epic title body args
+  name=$(ralph_flaky_test_name < "$red_log") || name=""
+  epic=$(ralph_issue_parent "$num" 2>/dev/null) || epic=""
+  parent=$(ralph_flaky_parent "$epic" "$(ralph_epic_changed_files "$epic")" < "$red_log")
+  title="[ISSUE] Niestabilny test: ${name:-nieustalony (ogólnie bramka)}"
+  body="## What to build
+
+Bramka (\`${cmd}\`) była czerwona po zamknięciu issue #${num}, a przy jednym powtórzeniu zielona — test jest niestabilny. Ustal przyczynę niestabilności i ją usuń (czas, kolejność, wspólny stan, sieć); nie dodawaj powtórzeń ani opóźnień na ślepo.
+
+Czerwony przebieg (koniec wyjścia):
+
+\`\`\`\`
+$(ralph_gate_tail "$red_log")
+\`\`\`\`
+
+Pełne wyjście czerwonego przebiegu: ${red_log}
+
+## Acceptance criteria
+
+- [ ] Przyczyna niestabilności ustalona i usunięta, test przechodzi powtarzalnie.
+- [ ] Trzy pętle testów zielone."
+  args=(--title "$title" --body "$body" --label complexity:normal --label ready-for-agent)
+  [ -z "$parent" ] || args+=(--parent "$parent")
+  gh issue create "${args[@]}" >/dev/null 2>&1
+}
+
 # Runs the ralph-gate: command of this repo (read from CLAUDE.md in the repo root, run there) after
 # the run closed issue $1, and acts on the result. Full output goes to a log in the git dir's
 # ralph-logs/; the screen gets the start, the duration and the verdict. Leaves in RALPH_GATE_EXIT
@@ -955,7 +1035,7 @@ ralph_gate_fail_count() {
 # code decides: the output goes to a file, not through a pipe that would swallow it. No gate line
 # (the strażnik was skipped) is an error, never a silent green.
 ralph_gate_check() {
-  local num="$1" root cmd dir log start rc prior action body
+  local num="$1" root cmd dir log red_log start rc prior action body
   RALPH_GATE_EXIT=""
   root=$(git rev-parse --show-toplevel 2>/dev/null) || root=.
   cmd=$(ralph_contract_section "$root/$(ralph_contract_file)" 2>/dev/null | ralph_gate_command) || cmd=""
@@ -975,10 +1055,24 @@ ralph_gate_check() {
     return 0
   fi
   ralph_say err "✗ Bramka czerwona (kod ${rc}, $((SECONDS - start)) s). Log: $log"
+  # One rerun, never more: green now means a flaky test, not a fixed one — the run counts as done
+  # and the flake gets its own issue. Red again is red.
+  red_log="$log"
+  log="${red_log%.log}-powtorzenie.log"
+  ralph_say dim "Bramka: powtarzam raz, żeby odróżnić niestabilny test od prawdziwej porażki."
+  start=$SECONDS
+  (cd "$root" && bash -c "$cmd") </dev/null >"$log" 2>&1
+  rc=$?
+  if [ "$rc" = 0 ]; then
+    ralph_say warn "Bramka zielona po powtórzeniu ($((SECONDS - start)) s) — niestabilny test. Log czerwonego przebiegu: $red_log"
+    ralph_report_flaky_test "$num" "$red_log" "$cmd" || ralph_say err "Nie udało się założyć issue o niestabilnym teście."
+    return 0
+  fi
+  ralph_say err "✗ Bramka czerwona także po powtórzeniu (kod ${rc}, $((SECONDS - start)) s). Log: $log"
   prior=$(ralph_gate_fail_count "$num")
   action=$(ralph_gate_action "$rc" "$prior")
   body="${RALPH_GATE_FAIL_MARKER}
-Bramka (\`${cmd}\`) jest czerwona po zamknięciu issue (kod ${rc}, próba $((prior + 1)) z 2). Pełne wyjście: ${log}
+Bramka (\`${cmd}\`) jest czerwona po zamknięciu issue, także po jednym powtórzeniu (kod ${rc}, próba $((prior + 1)) z 2). Pełne wyjście: ${red_log}; powtórzenie: ${log}
 
 Koniec wyjścia:
 

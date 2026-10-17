@@ -202,8 +202,16 @@ w `.git/ralph-logs/<czas>-gate-<nr>.log`. Run, który zostawił issue otwarte, b
   koniec wyjścia, ścieżka logu), epic nie dostaje `needs-human-test`, run kończy się kodem 7
   i `ralph-epic` jedzie dalej;
 - czerwona drugi raz na tym samym issue — issue wraca otwarte, a `ralph-epic` staje (kod 3,
-  potrzebny człowiek). Powtórzenie czerwonej bramki i niestabilne testy to jeszcze nie ta wersja:
-  czerwona znaczy czerwona;
+  potrzebny człowiek);
+- **niestabilny test:** czerwona bramka jest powtarzana raz (log powtórzenia obok logu czerwonego,
+  z sufiksem `-powtorzenie`). Czerwona, a potem zielona to niestabilny test: run zaliczony jak po
+  zielonej bramce, a pętla zakłada `[ISSUE] Niestabilny test: <nazwa>` z `complexity:normal`
+  i `ready-for-agent`, z końcem wyjścia czerwonego przebiegu i ścieżką jego logu. `<nazwa>` to
+  identyfikator testu wyczytany z wyjścia (TAP `not ok`, linia `✗`, `--- FAIL:`, `FAIL:`), inaczej
+  opis ogólny. Rodzicem jest epic issue, gdy plik testu widoczny w czerwonym wyjściu zmienił się
+  w commitach epicu (`<baza>..epic/<nr>`); inaczej issue powstaje bez rodzica. Czerwona dwa razy
+  to czerwona, jak wyżej. Worker może powtórzyć pętlę testów raz, nigdy do zielonego, i opisuje
+  każde powtórzenie w raporcie;
 - brak linii `ralph-gate:` w chwili runu — błąd (kod 1), nigdy cicha zielona. Wznowiony przegląd
   heavy nie uruchamia bramki ponownie (była zielona, zanim przegląd ruszył).
 

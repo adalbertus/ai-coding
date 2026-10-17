@@ -73,6 +73,12 @@ A loop that failed to start is not green. If all that is missing is the repo's d
 dependencies, install them with its own package manager and lockfile; otherwise treat the issue
 as not complete (see THE ISSUE).
 
+A loop that is red may be repeated ONCE, to tell a flaky test from a real failure. Never repeat a
+loop until it turns green: a second red is red, and you fix the cause. Describe every repetition
+in your closing issue comment (which loop, what the first run and the repeat showed). If the
+repeat is green, name the flaky test there; the loop opens a separate issue for it, do not fix it
+here.
+
 # DOC-SYNC (only when you will self-close)
 
 If — and ONLY if — this issue's done-criteria are fully met by the automated gate and you are

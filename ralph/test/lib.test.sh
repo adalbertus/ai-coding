@@ -776,6 +776,26 @@ expect_eq "gate action: green after an earlier red -> ok" "$(ralph_gate_action 0
 expect_eq "gate action: first red -> retry" "$(ralph_gate_action 1 0)" "retry"
 expect_eq "gate action: second red -> stop" "$(ralph_gate_action 2 1)" "stop"
 
+# --- Niestabilny test: nazwa i rodzic (czyste funkcje) ---
+expect_eq "flaky name: TAP not ok" "$(ralph_flaky_test_name <<<$'ok 1 - a\nnot ok 2 - zapis pliku')" "zapis pliku"
+expect_eq "flaky name: ✗ line (this repo's expect_eq)" "$(ralph_flaky_test_name <<<$'✓ a\n✗ gate: red')" "gate: red"
+expect_eq "flaky name: go --- FAIL" "$(ralph_flaky_test_name <<<$'--- FAIL: TestFoo (0.01s)')" "TestFoo"
+expect_eq "flaky name: FAILED pytest id" "$(ralph_flaky_test_name <<<$'FAILED tests/a.py::test_x - boom')" "tests/a.py::test_x - boom"
+expect_eq "flaky name: first match wins" "$(ralph_flaky_test_name <<<$'not ok 1 - one\nnot ok 2 - two')" "one"
+expect_eq "flaky name: unreadable output -> nothing" "$(ralph_flaky_test_name <<<$'boom\nexit 1' || true)" ""
+expect_eq "flaky parent: test file changed in the epic -> epic" \
+  "$(ralph_flaky_parent 45 $'README.md\nralph/test/lib.test.sh' <<<'FAIL in ralph/test/lib.test.sh line 3')" "45"
+expect_eq "flaky parent: ./ and absolute prefixes still match" \
+  "$(ralph_flaky_parent 45 $'ralph/test/lib.test.sh' <<<'/work/repo/ralph/test/lib.test.sh: failed')" "45"
+expect_eq "flaky parent: test file not changed in the epic -> no parent" \
+  "$(ralph_flaky_parent 45 $'README.md' <<<'FAIL ralph/test/lib.test.sh')" ""
+expect_eq "flaky parent: output names no test file -> no parent" \
+  "$(ralph_flaky_parent 45 $'ralph/test/lib.test.sh' <<<'boom')" ""
+expect_eq "flaky parent: issue without an epic -> no parent" \
+  "$(ralph_flaky_parent '' $'ralph/test/lib.test.sh' <<<'ralph/test/lib.test.sh')" ""
+expect_eq "flaky parent: no changed files -> no parent" \
+  "$(ralph_flaky_parent 45 '' <<<'ralph/test/lib.test.sh')" ""
+
 gate_tail_file=$(mktemp)
 seq 1 100000 > "$gate_tail_file"
 gate_tail_out=$(ralph_gate_tail "$gate_tail_file")
@@ -819,9 +839,17 @@ gate_case() {
     repo=$(mktemp -d); cd "$repo" && git init -q
     if [ -n "$g_cmd" ]; then printf '# T\n\n## Ralph\n\nralph-gate: %s\n' "$g_cmd" > CLAUDE.md
     else printf '# T\n\n## Ralph\n\nbez linii bramki\n' > CLAUDE.md; fi
+    if [ -n "${GATE_EPIC_FILE:-}" ]; then
+      printf 'ralph-base-branch: main\n' >> CLAUDE.md
+      git add -A && git -c user.email=t@t -c user.name=t commit -q -m base && git branch -M main
+      git checkout -q -b epic/45 && mkdir -p t && echo x > "$GATE_EPIC_FILE" && git add -A \
+        && git -c user.email=t@t -c user.name=t commit -q -m epic && git checkout -q main
+    fi
     gh_calls=$(mktemp); reviewed=no
     gh() {
       if [ "$1 $2" = "issue view" ]; then echo "$g_state"
+      elif [ "$1" = api ] && [[ "$2" == */parent ]]; then
+        if [ -n "${GATE_PARENT:-}" ]; then echo "$GATE_PARENT"; else echo '{"status":"404"}'; return 1; fi
       elif [ "$1" = api ]; then jq -s -c . "$GATE_COMMENTS"
       else
         echo "$1 $2 $3" >> "$gh_calls"; printf '%s\n' "$*" >> "$GATE_FULL"
@@ -884,6 +912,33 @@ expect_eq "gate: first red -> 7, the next red on the state it left behind -> 3" 
   "$(gate_case 'exit 1' 0 | cut -d'|' -f1)|$(gate_case 'exit 1' keep | cut -d'|' -f1)|$(gate_case 'exit 1' keep | cut -d'|' -f1)" "7|3|3"
 expect_eq "gate: the first red's comment is on the issue, so a green run afterwards stays green" \
   "$(gate_case 'exit 1' 0 >/dev/null; gate_case 'true' keep | cut -d'|' -f1)" "none"
+
+# Niestabilny test: czerwona → (jedno powtórzenie) → zielona. Stateful gate command: red on its
+# first run, green after (the state file is per case).
+flaky_cmd() { echo "f=$1; if [ -f \$f ]; then exit 0; else touch \$f; echo 'not ok 3 - flaky thing' ; echo t/x.test.sh; exit 1; fi"; }
+flaky_case() { local st; st=$(mktemp -u); gate_case "$(flaky_cmd "$st")" "${1:-0}" "${@:2}"; rm -f "$st"; }
+expect_eq "flaky: red then green -> run passes (no exit code), no reopen, issue created" \
+  "$(flaky_case 0 | cut -d'|' -f1)|$(grep -c '^issue create' "$GATE_FULL")|$(grep -c 'issue reopen' "$GATE_FULL")" "none|1|0"
+expect_eq "flaky: the issue carries complexity:normal and ready-for-agent" \
+  "$(grep -c -- '--label complexity:normal --label ready-for-agent' "$GATE_FULL")" "1"
+expect_eq "flaky: title names the test, body has the red output and the log path" \
+  "$(grep -c '\[ISSUE\] Niestabilny test: flaky thing' "$GATE_FULL")|$(grep -c 'ralph-logs/.*-gate-12.log' "$GATE_FULL")|$(grep -c '^not ok 3' "$GATE_FULL")" "1|1|1"
+expect_eq "flaky: no epic -> no parent" "$(grep -c -- '--parent' "$GATE_FULL")" "0"
+expect_eq "flaky: the gate is not red-commented (no gate marker)" "$(grep -c -F "$RALPH_GATE_FAIL_MARKER" "$GATE_FULL")" "0"
+expect_eq "flaky: heavy issue, flaky gate -> run counts as green, przegląd runs" \
+  "$(flaky_case 0 closed afk heavy | cut -d'|' -f1-2)" "none|yes"
+expect_eq "flaky: red then red -> as before (first red = 7, reopened, no flaky issue)" \
+  "$(gate_case 'exit 1' 0 | cut -d'|' -f1)|$(grep -c '^issue create' "$GATE_FULL")" "7|0"
+expect_eq "flaky: red then red on the second failure -> 3" \
+  "$(gate_case 'exit 1' 1 | cut -d'|' -f1)" "3"
+expect_eq "flaky: the gate is repeated exactly once, never until green" \
+  "$(gate_case 'echo ran >> "$GATE_RAN"; exit 1' 0 >/dev/null; ran)" "2"
+expect_eq "flaky: a green gate is not repeated" \
+  "$(gate_case 'echo ran >> "$GATE_RAN"' 0 >/dev/null; ran)" "1"
+expect_eq "flaky: epic changed the test file named in the output -> --parent epic" \
+  "$(GATE_PARENT=45 GATE_EPIC_FILE=t/x.test.sh flaky_case 0 >/dev/null; grep -c -- '--parent 45' "$GATE_FULL")" "1"
+expect_eq "flaky: epic did not change that file -> no parent" \
+  "$(GATE_PARENT=45 GATE_EPIC_FILE=t/other.sh flaky_case 0 >/dev/null; grep -c -- '--parent' "$GATE_FULL")" "0"
 rm -f "$GATE_RAN" "$GATE_FULL" "$GATE_COMMENTS"
 
 # The sequence once.sh runs after the worker (ralph_after_worker): bramka -> przegląd heavy ->
@@ -938,15 +993,15 @@ after_worker_case() {
 expect_eq "after worker: last sub-issue closed, gate green -> exit 0, epic marked after the gate" \
   "$(after_worker_case "$GATE_OK")" "0|gate,label-epic,comment-epic"
 expect_eq "after worker: last sub-issue closed, gate red -> exit 7, issue reopened, epic NOT marked" \
-  "$(after_worker_case "$GATE_RED")" "7|gate,reopen,ready,comment"
+  "$(after_worker_case "$GATE_RED")" "7|gate,gate,reopen,ready,comment"
 expect_eq "after worker: second red on the same issue -> exit 3, epic NOT marked" \
-  "$(after_worker_case "$GATE_RED" normal ok 1)" "3|gate,reopen,ready,comment"
+  "$(after_worker_case "$GATE_RED" normal ok 1)" "3|gate,gate,reopen,ready,comment"
 expect_eq "after worker: no ralph-gate: line -> exit 1, no gate, epic NOT marked" \
   "$(after_worker_case '')" "1|"
 expect_eq "after worker: no ralph-gate: line on a heavy issue -> exit 1, no review, epic NOT marked" \
   "$(after_worker_case '' heavy)" "1|"
 expect_eq "after worker: heavy, gate red -> no przegląd, exit 7, epic NOT marked" \
-  "$(after_worker_case "$GATE_RED" heavy)" "7|gate,reopen,ready,comment"
+  "$(after_worker_case "$GATE_RED" heavy)" "7|gate,gate,reopen,ready,comment"
 expect_eq "after worker: heavy, gate green, przegląd OK -> gate, then przegląd, then the epic" \
   "$(after_worker_case "$GATE_OK" heavy)" "0|gate,review,label-epic,comment-epic"
 expect_eq "after worker: heavy, gate green, przegląd FAIL -> exit 7, epic NOT marked" \
@@ -1109,7 +1164,7 @@ resume_seq_case() {
 expect_eq "resume: worker phase, the worker closes the issue, gate green -> gate runs once, epic marked" \
   "$(resume_seq_case worker "$GATE_OK")" "0|worker:$SID,gate,label-epic,comment-epic"
 expect_eq "resume: worker phase, gate red -> issue reopened, no przegląd, epic NOT marked" \
-  "$(resume_seq_case worker "$GATE_RED" heavy)" "7|worker:$SID,gate,reopen,ready,comment"
+  "$(resume_seq_case worker "$GATE_RED" heavy)" "7|worker:$SID,gate,gate,reopen,ready,comment"
 expect_eq "resume: worker phase, heavy, gate green -> przegląd follows the gate" \
   "$(resume_seq_case worker "$GATE_OK" heavy)" "0|worker:$SID,gate,review:,label-epic,comment-epic"
 expect_eq "resume: worker phase, no ralph-gate: line -> exit 1, epic NOT marked" \
