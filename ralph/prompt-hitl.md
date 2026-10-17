@@ -80,7 +80,7 @@ First find out whether the issue has a parent (it is then a sub-issue of an epic
   the automated gate alone (`gh issue close`, with summary + commit SHA); no `needs-human-test`
   and no manual test steps on the sub-issue. Deviations from the plan go to the epic
   (`gh issue comment <epic>`); no deviations, no comment. Do not mark the epic for acceptance
-  yourself: the loop script does it once its last sub-issue is closed.
+  yourself: once its last sub-issue is closed, the loop script verifies the epic and labels it.
   Gate not green or work unfinished: leave the sub-issue open and comment on progress.
 
 The issue does not get `ready-for-agent` back from you: only the human returns an issue to the

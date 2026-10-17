@@ -161,8 +161,9 @@ Apply the done-criteria from `## Ralph` to decide how to close out:
     — steps in the epic's acceptance scenario that no longer match, extra checks the work turned
     out to need, actual UI labels that differ from the ones assumed — post them with
     `gh issue comment <epic> --body "<deviations>"`. If nothing deviates, write nothing in the epic.
-  - **Marking the epic for acceptance is not yours.** The loop script labels the epic
-    `needs-human-test` once its last sub-issue is closed; do not label or comment on it for that.
+  - **Marking the epic for acceptance is not yours.** Once its last sub-issue is closed, the loop
+    script verifies the epic and only then labels it `needs-human-test`; do not label or comment
+    on it for that.
 - **Gate not green or work unfinished** — same as the "Not complete" path above: leave the
   sub-issue open without `needs-human-test` and comment on it with progress.
 

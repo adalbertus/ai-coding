@@ -26,7 +26,9 @@ args="$*"
 case "$args" in
   *"--label needs-human-test"*) cat "$FAKE_DIR/pending" 2>/dev/null ;;
   "issue list --state open"*) cat "$FAKE_DIR/epics" 2>/dev/null ;;
-  "api --paginate repos/{owner}/{repo}/issues/"*"/sub_issues") cat "$FAKE_DIR/subs.json" 2>/dev/null ;;
+  "api --paginate repos/{owner}/{repo}/issues/"*"/sub_issues")
+    n="${args#api --paginate repos/\{owner\}/\{repo\}/issues/}"; n="${n%/sub_issues}"
+    cat "$FAKE_DIR/subs-$n.json" 2>/dev/null || cat "$FAKE_DIR/subs.json" 2>/dev/null ;;
   "api --paginate repos/{owner}/{repo}/issues/13/dependencies/blocked_by") echo '[{"number":12,"state":"open"}]' ;;
   "api --paginate repos/{owner}/{repo}/issues/"*"/dependencies/blocked_by") echo '[]' ;;
   "issue view"*"--json labels"*) [ -f "$FAKE_DIR/ready" ] && echo true || echo false ;;
@@ -57,7 +59,7 @@ SUBS='[{"number":11,"title":"Zrobione","state":"closed","labels":[]},{"number":1
 # run <seq lines, \n-separated> [args...]; env: PENDING (gate listing)
 run() {
   local seq="$1"; shift
-  rm -f "$FAKE"/{ready,notifications,once-args}
+  rm -f "$FAKE"/{ready,notifications,once-args} "$FAKE"/subs-*.json
   printf '%s\n' "$seq" > "$FAKE/seq"
   printf '%s' "${PENDING:-}" > "$FAKE/pending"
   printf '10\n20\n' > "$FAKE/epics"
@@ -138,6 +140,56 @@ run $'0 12\n0 12\n0 12\n0 12\n0 12' 10
 expect "limit -> stop after 4 runs" 2 "Limit iteracji (4)"
 expect_eq "  exactly 4 runs" "$(runs)" "4"
 
+# Weryfikacja epica (ADR 0018): an epic with every sub-issue closed and no needs-human-test is work.
+# once.sh's exit 9 = "do odbioru", 7 = a "Poprawka" opened (go on). Epic #10 below: all closed.
+ALL_CLOSED='[{"number":11,"title":"A","state":"closed","labels":[]},{"number":12,"title":"B","state":"closed","labels":[]}]'
+ONE_OPEN='[{"number":11,"title":"A","state":"closed","labels":[]},{"number":12,"title":"B","state":"open","labels":[{"name":"ready-for-agent"}]}]'
+epic_run() { # <seq> <epics file content> <subs file for #10 ('' = default)> [args...]
+  local seq="$1" epics="$2" subs10="$3"; shift 3
+  rm -f "$FAKE"/{ready,notifications,once-args} "$FAKE"/subs-*.json
+  printf '%s\n' "$seq" > "$FAKE/seq"; printf '%b' "$epics" > "$FAKE/epics"; printf '%s' "${PENDING:-}" > "$FAKE/pending"
+  printf '%s' "$SUBS" > "$FAKE/subs.json"
+  [ -z "$subs10" ] || printf '%s' "$subs10" > "$FAKE/subs-10.json"
+  [ -z "${SUBS7:-}" ] || printf '%s' "$SUBS7" > "$FAKE/subs-7.json"
+  LAST_OUT=$(FAKE_DIR="$FAKE" PATH="$FAKE/bin:$PATH" RALPH_ONCE_CMD="$FAKE/once" bash "$EPIC" "$@" 2>&1)
+  LAST_RC=$?
+}
+
+epic_run $'9' '10\n' "$ALL_CLOSED" 10
+expect "all sub-issues closed, no label -> the weryfikacja runs instead of 'nothing to do'; code 9 -> ready" 0 "Epic #10 gotowy do odbioru"
+expect_eq "  exactly one run, of the epic" "$(runs)|$(head -1 "$FAKE/once-args")" "1|claude 10"
+expect "  the acceptance command ends the output" 0 'claude "/odbior 10"'
+expect_eq "  last line of the output is that command" "$(tail -1 <<<"$LAST_OUT" | grep -c 'claude "/odbior 10"')" "1"
+expect "  the start line gives the room for a weryfikacja" 0 "limit iteracji: 3"
+
+epic_run $'7\n9' '10\n' "$ALL_CLOSED" 10
+expect "round 1 red (7: Poprawka opened) -> the loop goes on, then the next weryfikacja hands over (9)" 0 "gotowy do odbioru"
+expect_eq "  two runs" "$(runs)" "2"
+
+epic_run $'0 12\n9' '10\n' "$ONE_OPEN" 10
+expect "closing the last sub-issue in iteration N -> iteration N+1 is the weryfikacja, no human in between" 0 "gotowy do odbioru"
+expect_eq "  two runs, both of epic #10" "$(runs)|$(grep -c '^claude 10$' "$FAKE/once-args")" "2|2"
+
+epic_run $'0 12\n7' '10\n' "$ONE_OPEN" 10
+expect "the weryfikacja counts as an iteration: limit reached on it -> stop as at the limit" 2 "Limit iteracji (2)"
+expect_eq "  the epic is not labelled by ralph-epic" "$([ -f "$FAKE/ready" ] && echo yes || echo no)" "no"
+
+SUBS7="$ALL_CLOSED" epic_run $'9' '7\n10\n' '' 
+expect "no number: a started epic waiting for weryfikacja goes before another with open sub-issues" 0 "epic #7"
+expect_eq "  takes #7" "$(head -1 "$FAKE/once-args")" "claude 7"
+
+epic_run $'9' '10\n' "$ONE_OPEN"
+expect_eq "no number: an epic with open sub-issues is taken as before" "$(head -1 "$FAKE/once-args")" "claude 10"
+
+PENDING=$'  #99: [PRD] Czeka' SUBS7="$ALL_CLOSED" epic_run $'9' '7\n' '' 
+expect "no number: an epic awaiting acceptance elsewhere still refuses to start, even with another to verify" 2 "#99: [PRD] Czeka"
+expect_eq "  no run" "$(runs)" "0"
+SUBS7=""
+
+epic_run $'2 - ready' '10\n' "$ALL_CLOSED" 10
+expect "an epic already labelled (once.sh: nothing to do, label present) -> ready, no second weryfikacja" 0 "gotowy do odbioru"
+expect_eq "  one run only" "$(runs)" "1"
+
 # Without a number: the gate, then the epic pick (started #10 over #20).
 PENDING=$'  #99: [PRD] Czeka' run $'0' 
 expect "no number, awaiting epic -> refuses and names it" 2 "#99: [PRD] Czeka"
@@ -185,6 +237,79 @@ expect_eq "  screen keeps colour (green ready)" "$r" "yes"
 expect_eq "  once.sh inherits the log (so it opens none of its own)" \
   "$(grep -c "^runlog:.git/ralph-logs/$logs\$" "$FAKE/once-args")" "2"
 rm -rf "$LOGREPO"
+
+# once.sh itself against a fake gh and claude, in a throwaway repo: `ralph-once <epic>` verifies an
+# epic whose sub-issues are all closed; the loop never labels an epic on its own any more.
+ONCE_SH="$SCRIPT_DIR/../once.sh"
+OFAKE=$(mktemp -d); mkdir -p "$OFAKE/bin"
+cat > "$OFAKE/bin/claude" <<'CL'
+#!/usr/bin/env bash
+echo "claude $*" >> "$ONCE_CALLS"
+CL
+cat > "$OFAKE/bin/gh" <<'GH'
+#!/usr/bin/env bash
+# Fake gh for once.sh: epic #50; sub-issues, label and comments come from $OFAKE_DIR; every write lands in $ONCE_CALLS.
+args="$*"
+case "$args" in
+  "issue view 50 --json title"*) echo "[PRD] Epic" ;;
+  "issue view 50 --json labels"*) cat "$OFAKE_DIR/label" ;;
+  "issue view 50 --json body"*) printf '## Jak odebrać\n\n1. Zrób krok\n' ;;
+  "issue list --label needs-human-test"*) ;;
+  "issue list --state open"*) echo 50 ;;
+  "api --paginate repos/{owner}/{repo}/issues/50/sub_issues") cat "$OFAKE_DIR/subs.json" ;;
+  "api --paginate repos/{owner}/{repo}/issues/50/comments") cat "$OFAKE_DIR/comments.json" ;;
+  "api --paginate repos/{owner}/{repo}/issues?state=open"*) echo '[]' ;;
+  "issue comment 50 --body "*) echo "comment-epic" >> "$ONCE_CALLS" ;;
+  "issue edit 50 --add-label needs-human-test") echo "label-epic" >> "$ONCE_CALLS" ;;
+  "issue create "*) echo "create: $args" >> "$ONCE_CALLS" ;;
+esac
+GH
+chmod +x "$OFAKE/bin/claude" "$OFAKE/bin/gh"
+# once_case <subs json> <label true|false> <comments json> <gate command> [ralph-once args...]
+once_case() {
+  local subs="$1" label="$2" comments="$3" gate="$4" repo; shift 4
+  repo=$(mktemp -d); git -C "$repo" init -q
+  printf '# T\n\n## Ralph\n\nBramka zielona = gotowe.\n\nralph-gate: %s\n' "$gate" > "$repo/CLAUDE.md"
+  printf '%s' "$subs" > "$OFAKE/subs.json"; printf '%s' "$label" > "$OFAKE/label"; printf '%s' "$comments" > "$OFAKE/comments.json"
+  : > "$OFAKE/calls"
+  LAST_OUT=$(cd "$repo" && ONCE_CALLS="$OFAKE/calls" OFAKE_DIR="$OFAKE" PATH="$OFAKE/bin:$PATH" RALPH_GATE_CMD="echo READY" \
+    bash "$ONCE_SH" "$@" 2>&1)
+  LAST_RC=$?
+  rm -rf "$repo"
+}
+calls() { paste -sd, "$OFAKE/calls"; }
+GATE_Y='echo gate >> "$ONCE_CALLS"'
+GATE_N='echo gate >> "$ONCE_CALLS"; exit 1'
+
+once_case "$ALL_CLOSED" false '[]' "$GATE_Y" 50
+expect "ralph-once <epic>, all sub-issues closed, gate green -> exit 9 (do odbioru)" 9 'claude "/odbior 50"'
+expect_eq "  gate, round marker, label, acceptance list" "$(calls)" "gate,comment-epic,label-epic,comment-epic"
+
+once_case "$ALL_CLOSED" false '[]' "$GATE_N" 50
+expect "ralph-once <epic>, gate red in round 1 -> exit 7, a Poprawka under the epic" 7 "Poprawka"
+expect_eq "  gate, round marker, create — and no label" "$(calls | sed 's/create: .*/create/')" "gate,comment-epic,create"
+
+once_case "$ALL_CLOSED" false '[{"body":"<!-- ralph-weryfikacja: runda -->\nrunda 1"}]' "$GATE_N" 50
+expect "ralph-once <epic>, gate red in round 2 -> exit 9, labelled, no new Poprawka" 9 "oznaczony needs-human-test"
+expect_eq "  gate, round marker, label, list" "$(calls)" "gate,comment-epic,label-epic,comment-epic"
+
+once_case "$ALL_CLOSED" true '[]' "$GATE_Y" 50
+expect "ralph-once <epic> already labelled needs-human-test -> exit 2, not verified again" 2 "czeka na odbiór"
+expect_eq "  nothing run, nothing written" "$(calls)" ""
+
+once_case '[]' false '[]' "$GATE_Y" 50
+expect "ralph-once <epic> without sub-issues -> exit 2, neither verified nor labelled" 2 "nie jest zaplanowany"
+expect_eq "  nothing run, nothing written" "$(calls)" ""
+
+once_case "$ONE_OPEN" false '[]' "$GATE_Y" 50
+expect_eq "ralph-once <epic> with an open sub-issue works as before: no weryfikacja, no label" "$(calls)" ""
+
+once_case "$ALL_CLOSED" false '[]' "$GATE_Y"
+expect_eq "ralph-once without a number no longer labels an epic whose sub-issues are all closed" "$(calls)" ""
+
+once_case "$ALL_CLOSED" false '[]' "" 50
+expect "ralph-once <epic> without a gate line -> refused (the strażnik), nothing verified" 1 "ralph-gate"
+rm -rf "$OFAKE"
 
 # Argument errors.
 run $'0' foo

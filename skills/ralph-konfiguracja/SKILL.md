@@ -51,7 +51,7 @@ the strażnik's model gate marks the section MISSING if the loops are vague or p
 
 Work runs in **epics**: a `[PRD]` parent issue with sub-issues. The worker closes a sub-issue
 itself once the gate is green; whatever the gate cannot prove is checked by a human at the
-**acceptance of the epic** (`needs-human-test` lands on the epic after its last sub-issue), not
+**acceptance of the epic** (`needs-human-test` lands on the epic after its last sub-issue, once the loop has verified the epic), not
 per sub-issue. An issue without a parent keeps the older rule: `needs-human-test` + a manual
 scenario. The done-criteria you write must carry both rules.
 

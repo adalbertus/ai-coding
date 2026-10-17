@@ -48,7 +48,7 @@ epics=$(ralph_epics_json)
 if [ -z "$epic" ]; then
   epic=$(ralph_pick_epic <<<"$epics")
   if [ -z "$epic" ]; then
-    finish "$RALPH_EXIT_NOTHING" "Ralph: brak epicu" "Brak epicu z otwartymi sub-issues. Nie ma nic do zrobienia."
+    finish "$RALPH_EXIT_NOTHING" "Ralph: brak epicu" "Brak epicu z otwartymi sub-issues ani czekającego na weryfikację. Nie ma nic do zrobienia."
   fi
 fi
 
@@ -86,7 +86,8 @@ while :; do
   case "$(ralph_epic_decision "$code" "$runs" "$limit" "$ready")" in
     continue) ;;
     stop-ready)
-      finish "$RALPH_EXIT_DONE" "Ralph: epic #${epic} gotowy" "Epic #${epic} gotowy do odbioru." ;;
+      finish "$RALPH_EXIT_DONE" "Ralph: epic #${epic} gotowy" "Epic #${epic} gotowy do odbioru.
+Odbiór: $(ralph_acceptance_command "$epic" "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")" ;;
     stop-afk-failed)
       finish "$RALPH_EXIT_AFK_FAILED" "Ralph: porażka AFK" \
 "Issue #${issue:-?} (epic #${epic}) nie zostało domknięte i nadal ma ready-for-agent — porażka, bez pomijania. Zobacz komentarz workera, przeglądu heavy albo bramki w tym issue (gh issue view ${issue:-?} --comments) i logi w .git/ralph-logs/." ;;

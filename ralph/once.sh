@@ -7,6 +7,9 @@
 # `ralph-once <n>` runs issue <n> directly, skipping stage 1 (and the selector's token cost).
 # An issue without `ready-for-agent` (HITL) opens an interactive session; without a number only AFK is taken.
 # `ralph-once <epic>` ([PRD] prefix) works one of that epic's open sub-issues: the lowest-numbered free one.
+# An epic whose sub-issues are all closed (and without `needs-human-test`) is verified instead: the
+# bramka over the whole epic, then either `needs-human-test` with the acceptance list or, in
+# round 1, a "Poprawka" sub-issue (ADR 0018). This is the only way an epic gets `needs-human-test`.
 # In loop mode a started epic (>=1 closed sub-issue) is finished before others are touched (ADR 0012).
 # Inside an epic, free AFK sub-issues go first; only when none is left is a free HITL one (no
 # `ready-for-agent`) taken and a HITL session opens (ADR 0013). The model selector runs only outside
@@ -21,9 +24,13 @@
 #   5  HITL session ended, issue open without `ready-for-agent` (unresolved)
 #   6  HITL session ended, issue open with `ready-for-agent` restored (handed back to AFK)
 #   7  przegląd heavy or the bramka failed once: the issue is reopened with its notes for one fix
-#      (ADR 0016, ADR 0018); a second failure of either gives 3 (AFK failed, a human is needed)
+#      (ADR 0016, ADR 0018); a second failure of either gives 3 (AFK failed, a human is needed).
+#      Also the weryfikacja of an epic whose bramka was red in round 1: a "Poprawka" sub-issue was
+#      opened and the loop goes on
 #   8  a usage limit stopped the run and its reset is too far to wait for; the ślad is left so the
 #      next run resumes the same session (ADR 0017)
+#   9  weryfikacja epica handed the epic over to acceptance (`needs-human-test` and the acceptance
+#      list are set); ralph-epic stops as at a ready epic
 #
 # Wznowienie po limicie (ADR 0017): a Claude worker or przegląd heavy cut off by a usage limit
 # waits for the reset (up to 6 h) and resumes its session. A later run finds the ślad and resumes
@@ -48,10 +55,6 @@ ralph_trap_release_lock
 # Wznowienie po limicie: a valid ślad is resumed before anything else. Its dirty tree is the
 # interrupted worker's work, on the branch it was working on. Never returns when it resumes.
 ralph_resume_from_trace "$ISSUE_ARG"
-
-# Epics whose sub-issues are all closed get `needs-human-test` from here, not from the worker —
-# so it works whoever closed the last one. Done before the gate so it sees the fresh label.
-[ -z "$ISSUE_ARG" ] && ralph_mark_ready_epics
 
 # 0. HARD GATE: never pile up unverified work. If any issue is already implemented and is
 #    waiting for a human to verify it (label `needs-human-test`), stop here and list them —
@@ -123,8 +126,17 @@ if [ -z "$ISSUE_ARG" ] || [ -n "$EPIC_ARG" ]; then
   if [ -n "$EPIC_ARG" ]; then
     open_count=$(jq -r --argjson e "$EPIC_ARG" '[.[] | select(.number == $e) | .open[]] | length' <<<"$epics")
     if [ "${open_count:-0}" = 0 ]; then
-      ralph_mark_epic_if_ready "$EPIC_ARG" || true
-      ralph_say warn "Epic #${EPIC_ARG} nie ma otwartych sub-issues — czeka na odbiór albo jest skończony. Nie uruchamiam workera."
+      epic_state=$(jq -r --argjson e "$EPIC_ARG" '[.[] | select(.number == $e) | .state][0] // empty' <<<"$epics")
+      if [ "$epic_state" = to-verify ]; then
+        # All sub-issues closed, not yet verified: the weryfikacja is this run's work (ADR 0018),
+        # on the epic's own branch like any work on it.
+        if [ -n "$base_branch" ]; then
+          ralph_prepare_branch "$base_branch" "$EPIC_ARG" || exit "$RALPH_EXIT_ERROR"
+        fi
+        ralph_verify_epic "$EPIC_ARG"
+        exit "$RALPH_VERIFY_EXIT"
+      fi
+      ralph_say warn "Epic #${EPIC_ARG} nie ma otwartych sub-issues — czeka na odbiór, nie jest zaplanowany albo jest skończony. Nie uruchamiam workera."
       exit "$RALPH_EXIT_NOTHING"
     fi
   fi

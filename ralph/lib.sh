@@ -782,8 +782,9 @@ RALPH_EXIT_AFK_FAILED=3  # AFK run left the issue open, still ready-for-agent
 RALPH_EXIT_DISCOVERED=4  # AFK run left it open without ready-for-agent (discovered HITL)
 RALPH_EXIT_HITL_OPEN=5   # HITL session ended, issue open without ready-for-agent
 RALPH_EXIT_HITL_TO_AFK=6 # HITL session ended, issue open with ready-for-agent restored
-RALPH_EXIT_REVIEW_RETRY=7 # przegląd heavy failed once: issue reopened for one fix
+RALPH_EXIT_REVIEW_RETRY=7 # przegląd heavy / bramka failed once (issue reopened), or the weryfikacja opened a "Poprawka"
 RALPH_EXIT_USAGE_LIMIT=8  # a usage limit stopped the run; ślad left for a resume (ADR 0017)
+RALPH_EXIT_ACCEPTANCE=9   # weryfikacja epica oddała epic do odbioru (needs-human-test)
 
 # $1: exit code of a finished worker run (from ralph_run_outcome); $2: issue number -> the
 # one-line verdict, coloured: green done, orange waiting for a human, red failure.
@@ -1143,38 +1144,155 @@ ralph_blocked_report() {
   done
 }
 
-# Pure decision: should the loop mark an epic for acceptance? $1: total sub-issues, $2: open
-# sub-issues, $3: "true" when the epic already has `needs-human-test`. rc 0 = mark. An epic with
-# no sub-issues is not done, it is unplanned.
-ralph_epic_ready_to_mark() {
-  [ "$1" -gt 0 ] && [ "$2" -eq 0 ] && [ "$3" != true ]
+# --- Weryfikacja epica (ADR 0018, warstwa 2): the last work of an epic and the only way to
+# `needs-human-test`. The loop no longer labels an epic when its last sub-issue closes; it verifies. ---
+
+# Comment markers. A verification round leaves one; /odbior leaves the acceptance one when it
+# opens "Poprawka" sub-issues. The list marker tags the comment /odbior reads the steps from.
+RALPH_VERIFY_MARKER='<!-- ralph-weryfikacja: runda -->'
+RALPH_ODBIOR_MARKER='<!-- ralph-odbior: runda -->'
+RALPH_ACCEPT_LIST_MARKER='<!-- ralph-lista-odbioru -->'
+
+# Pure. The state of an open epic. $1: total sub-issues, $2: open sub-issues, $3: "true" when it
+# has `needs-human-test`. Prints awaiting (the label is there, whatever else is true — also an
+# epic labelled before verification existed), unplanned (no sub-issues), in-progress (open
+# sub-issues) or to-verify (>=1 sub-issue, all closed, no label).
+ralph_epic_state() {
+  if [ "$3" = true ]; then echo awaiting
+  elif [ "$1" -eq 0 ]; then echo unplanned
+  elif [ "$2" -gt 0 ]; then echo in-progress
+  else echo to-verify
+  fi
 }
 
-# Thin gh layer over ralph_epic_ready_to_mark. $1: epic number. Labels the epic
-# `needs-human-test` and comments once; an already labelled epic is left alone. Returns 0 when
-# it marked the epic.
-ralph_mark_epic_if_ready() {
-  local epic="$1" subs total open labeled
-  subs=$(gh api --paginate "repos/{owner}/{repo}/issues/${epic}/sub_issues" 2>/dev/null | jq -s -c 'add // []') || return 1
-  [ -n "$subs" ] || return 1
-  total=$(jq 'length' <<<"$subs")
-  open=$(jq '[.[] | select(.state == "open")] | length' <<<"$subs")
-  labeled=$(gh issue view "$epic" --json labels --jq 'any(.labels[]; .name == "needs-human-test")' 2>/dev/null) || return 1
-  ralph_epic_ready_to_mark "$total" "$open" "$labeled" || return 1
-  gh label create needs-human-test --color 5319E7 \
-    --description "Implemented; awaiting human verification" >/dev/null 2>&1 || true
-  gh issue edit "$epic" --add-label needs-human-test >/dev/null 2>&1 || return 1
-  gh issue comment "$epic" --body "Epic gotowy do odbioru: wszystkie sub-issues zamknięte. Scenariusz w sekcji ## Jak odebrać." >/dev/null 2>&1
-  ralph_say ok "Epic #${epic}: wszystkie sub-issues zamknięte — oznaczony needs-human-test (do odbioru)."
+# Pure. stdin: the epic's comments as a JSON array of {body}, oldest first -> the number of the
+# verification round about to run: the round markers since the last acceptance marker, plus one.
+ralph_verify_round() {
+  jq -r --arg v "$RALPH_VERIFY_MARKER" --arg o "$RALPH_ODBIOR_MARKER" '
+    reduce .[].body as $b (0;
+      if ($b | contains($o)) then 0 elif ($b | contains($v)) then . + 1 else . end) + 1'
 }
 
-# Runs ralph_mark_epic_if_ready over every open [PRD] issue, whoever closed the last sub-issue.
-ralph_mark_ready_epics() {
-  local e
-  for e in $(gh issue list --state open --limit 200 --json number,title \
-      --jq '.[] | select(.title | startswith("[PRD]")) | .number' 2>/dev/null); do
-    ralph_mark_epic_if_ready "$e" || true
-  done
+# Pure. $1: exit code of the epic's gate, $2: the round number -> accept (green: hand over to
+# acceptance), fix (red in round 1: a "Poprawka" sub-issue, verify again after it) or
+# accept-red (red in round 2 or later: hand over anyway, the red gate on top of the list).
+ralph_verify_decision() {
+  if [ "$1" = 0 ]; then echo accept
+  elif [ "${2:-1}" -ge 2 ]; then echo accept-red
+  else echo fix
+  fi
+}
+
+# Pure. stdin: an epic's body -> the lines of its `## Jak odebrać` section (without the heading).
+ralph_epic_acceptance_steps() {
+  awk '/^##[[:space:]]+Jak odebrać[[:space:]]*$/ { on = 1; next } on && /^##[[:space:]]/ { exit } on { print }' \
+    | sed '/./,$!d'
+}
+
+# Pure. $1: epic number, $2: the worktree the run went in -> the command that opens the acceptance.
+ralph_acceptance_command() {
+  printf 'cd %q && claude "/odbior %s"\n' "$2" "$1"
+}
+
+# Pure. The acceptance list comment. $1: epic number, $2: the `## Jak odebrać` steps, $3: the
+# acceptance command; optional, when the gate is red: $4: its command, $5: exit code, $6: the end
+# of its output, $7: the log path. Unresolved findings go first.
+ralph_acceptance_list() {
+  local epic="$1" steps="$2" cmdline="$3" gate_cmd="${4:-}" rc="${5:-}" tail_out="${6:-}" log="${7:-}"
+  printf '%s\n## Lista odbioru epicu #%s\n\n' "$RALPH_ACCEPT_LIST_MARKER" "$epic"
+  if [ -n "$gate_cmd" ]; then
+    printf '### Nierozwiązane\n\n- Bramka (`%s`) jest czerwona także po poprawce (kod %s). Koniec wyjścia:\n\n````\n%s\n````\n\nPełne wyjście: %s\n\n' \
+      "$gate_cmd" "$rc" "$tail_out" "$log"
+  fi
+  printf '### Kroki (## Jak odebrać)\n\n%s\n\n' "${steps:-Epic nie ma sekcji ## Jak odebrać.}"
+  printf '### Odbiór\n\n```\n%s\n```\n' "$cmdline"
+}
+
+# Runs the verification of epic $1 (state to-verify), in the repo in cwd, on the branch the caller
+# put it on: the ralph-gate: command, the round marker, then what ralph_verify_decision says.
+# Leaves in RALPH_VERIFY_EXIT the exit code once.sh should report: RALPH_EXIT_ACCEPTANCE (the
+# epic is labelled `needs-human-test`, with the acceptance list), RALPH_EXIT_REVIEW_RETRY (round 1
+# red: a "Poprawka" sub-issue was opened, the loop goes on) or RALPH_EXIT_ERROR. Every GitHub
+# write that fails is an error: a verification that left no marker would run forever.
+ralph_verify_epic() {
+  local epic="$1" root cmd dir log start rc out comments round decision body steps cmdline tail_out
+  RALPH_VERIFY_EXIT="$RALPH_EXIT_ERROR"
+  root=$(git rev-parse --show-toplevel 2>/dev/null) || root=.
+  cmd=$(ralph_contract_section "$root/$(ralph_contract_file)" 2>/dev/null | ralph_gate_command) || cmd=""
+  if [ -z "$cmd" ]; then
+    ralph_say err "✗ Brak linii ralph-gate: w sekcji ## Ralph — nie weryfikuję epicu #${epic} bez bramki. Uruchom /ralph-konfiguracja."
+    return 0
+  fi
+  if ! out=$(gh api --paginate "repos/{owner}/{repo}/issues/${epic}/comments" 2>/dev/null) \
+      || ! comments=$(jq -s -c 'add // []' <<<"$out" 2>/dev/null); then
+    ralph_say err "✗ Nie udało się odczytać komentarzy epicu #${epic} (gh api) — bez numeru rundy nie weryfikuję."
+    return 0
+  fi
+  round=$(ralph_verify_round <<<"$comments")
+
+  dir="$(git rev-parse --absolute-git-dir 2>/dev/null)/ralph-logs"
+  if mkdir -p "$dir" 2>/dev/null; then log="$dir/$(date +%Y%m%d-%H%M%S)-weryfikacja-${epic}.log"; else log=$(mktemp); fi
+  ralph_say dim "Weryfikacja epicu #${epic}, runda ${round}: bramka ${cmd}"
+  start=$SECONDS
+  (cd "$root" && bash -c "$cmd") </dev/null >"$log" 2>&1
+  rc=$?
+  if [ "$rc" = 0 ]; then
+    ralph_say ok "✓ Bramka zielona ($((SECONDS - start)) s). Log: $log"
+  else
+    ralph_say err "✗ Bramka czerwona (kod ${rc}, $((SECONDS - start)) s). Log: $log"
+  fi
+  tail_out=$(ralph_gate_tail "$log")
+
+  if ! gh issue comment "$epic" --body "${RALPH_VERIFY_MARKER}
+Weryfikacja epicu: runda ${round}, bramka $([ "$rc" = 0 ] && echo zielona || echo "czerwona (kod ${rc})"). Log: ${log}" >/dev/null 2>&1; then
+    ralph_say err "✗ Nie udało się zapisać komentarza rundy w epicu #${epic} — przerywam, żeby nie weryfikować w kółko."
+    return 0
+  fi
+
+  decision=$(ralph_verify_decision "$rc" "$round")
+  case "$decision" in
+    fix)
+      body="## What to build
+
+Bramka (\`${cmd}\`) jest czerwona na całym epicu #${epic} (weryfikacja epicu, runda ${round}, kod ${rc}). Ustal przyczynę i napraw ją; nie osłabiaj testów, żeby przeszły.
+
+Koniec wyjścia:
+
+\`\`\`\`
+${tail_out}
+\`\`\`\`
+
+Pełne wyjście: ${log}
+
+## Acceptance criteria
+
+- [ ] Bramka (\`${cmd}\`) jest zielona na gałęzi epicu."
+      if ! gh issue create --title "[ISSUE] Poprawka: czerwona bramka" --body "$body" \
+          --label complexity:normal --label ready-for-agent --parent "$epic" >/dev/null 2>&1; then
+        ralph_say err "✗ Nie udało się założyć sub-issue „Poprawka: czerwona bramka” w epicu #${epic}."
+        return 0
+      fi
+      ralph_say warn "⚠ Epic #${epic}: bramka czerwona w rundzie ${round} — założone sub-issue „Poprawka: czerwona bramka”, po nim weryfikacja ruszy znowu."
+      RALPH_VERIFY_EXIT="$RALPH_EXIT_REVIEW_RETRY" ;;
+    *)
+      steps=$(gh issue view "$epic" --json body --jq .body 2>/dev/null | ralph_epic_acceptance_steps)
+      cmdline=$(ralph_acceptance_command "$epic" "$root")
+      if [ "$decision" = accept-red ]; then
+        body=$(ralph_acceptance_list "$epic" "$steps" "$cmdline" "$cmd" "$rc" "$tail_out" "$log")
+      else
+        body=$(ralph_acceptance_list "$epic" "$steps" "$cmdline")
+      fi
+      gh label create needs-human-test --color 5319E7 \
+        --description "Implemented; awaiting human verification" >/dev/null 2>&1 || true
+      if ! gh issue edit "$epic" --add-label needs-human-test >/dev/null 2>&1 \
+          || ! gh issue comment "$epic" --body "$body" >/dev/null 2>&1; then
+        ralph_say err "✗ Nie udało się oznaczyć epicu #${epic} (needs-human-test) albo zapisać listy odbioru."
+        return 0
+      fi
+      ralph_say ok "✓ Epic #${epic}: weryfikacja zakończona$([ "$decision" = accept-red ] && echo ", bramka nadal czerwona (na początku listy odbioru)") — oznaczony needs-human-test (do odbioru)."
+      echo "$cmdline"
+      RALPH_VERIFY_EXIT="$RALPH_EXIT_ACCEPTANCE" ;;
+  esac
 }
 
 # --- The end of a ralph-once run: what follows the worker, shared by a fresh run and a resumed one. ---
@@ -1203,8 +1321,8 @@ ralph_after_worker() {
     [ -n "$cost" ] && ralph_say dim "Koszt workera: $cost"
   fi
 
-  # The bramka (ADR 0018) and, after a green one, the przegląd heavy (ADR 0016): both before the
-  # epic can be marked for acceptance or anything counts the issue as done.
+  # The bramka (ADR 0018) and, after a green one, the przegląd heavy (ADR 0016): both before
+  # anything counts the issue as done, and so before its epic can reach the weryfikacja.
   ralph_verify_closed "$num" "$mode" "$complexity" "$pre_head" "$issue"
   ralph_finish_run "$num" "$mode"
 }
@@ -1213,11 +1331,6 @@ ralph_after_worker() {
 ralph_finish_run() {
   local num="$1" mode="$2" state has_label outcome
   ralph_exit_on_limit_stop
-
-  # The worker may have closed the last sub-issue of an epic: mark it for acceptance. Not when the
-  # bramka could not even run (no gate line): that issue is not verified. Nor after a red bramka
-  # or a failed przegląd: that issue is open again, so its epic still has an open sub-issue.
-  [ "${RALPH_GATE_EXIT:-}" = "$RALPH_EXIT_ERROR" ] || ralph_mark_ready_epics
 
   # Auto mode denies without prompting, so a run that could not finish (e.g. the commit was
   # blocked) now ends quietly. Uncommitted leftovers would poison the NEXT run — say it out loud.
@@ -1265,39 +1378,53 @@ ralph_resume_from_trace() {
 
 # --- ralph-epic: run once.sh over an epic until a stop condition (ADR 0013). ---
 
-# Epic structure: one sub_issues call per open epic -> array of {number, started, open:[...]}.
+# Epic structure: per open epic one sub_issues call and one label call -> array of
+# {number, started, open:[...], state}. `state` is ralph_epic_state (awaiting, unplanned,
+# in-progress, to-verify). A label GitHub cannot answer about counts as present: an epic is never
+# verified on a guess.
 ralph_epics_json() {
-  local epics="[]" e subs
+  local epics="[]" e subs total open labeled state
   for e in $(gh issue list --state open --limit 200 --json number,title \
       --jq '.[] | select(.title | startswith("[PRD]")) | .number' 2>/dev/null); do
     subs=$(gh api --paginate "repos/{owner}/{repo}/issues/${e}/sub_issues" 2>/dev/null | jq -s -c 'add // []')
     [ -n "$subs" ] || subs="[]"
-    epics=$(jq -c --argjson e "$e" --argjson subs "$subs" \
-      '. + [{number: $e, started: any($subs[]; .state == "closed"), open: [$subs[] | select(.state == "open") | .number]}]' \
+    total=$(jq 'length' <<<"$subs")
+    open=$(jq '[.[] | select(.state == "open")] | length' <<<"$subs")
+    labeled=$(gh issue view "$e" --json labels --jq 'any(.labels[]; .name == "needs-human-test")' 2>/dev/null) || labeled=true
+    [ "$labeled" = false ] || labeled=true
+    state=$(ralph_epic_state "$total" "$open" "$labeled")
+    epics=$(jq -c --argjson e "$e" --argjson subs "$subs" --arg state "$state" \
+      '. + [{number: $e, started: any($subs[]; .state == "closed"), open: [$subs[] | select(.state == "open") | .number], state: $state}]' \
       <<<"$epics")
   done
   printf '%s\n' "$epics"
 }
 
-# Pure. stdin: epics JSON. The epic ralph-epic takes without a number, by the selector's rule:
-# the lowest-numbered started epic with open sub-issues, else the lowest-numbered one with any.
-# Prints the number, or nothing.
+# Pure. stdin: epics JSON. The epic ralph-epic takes without a number: an epic to verify first
+# (the lowest-numbered one — its work is done and only the verification is left), else by the
+# selector's rule the lowest-numbered started epic with open sub-issues, else the lowest-numbered
+# one with any. Prints the number, or nothing.
 ralph_pick_epic() {
-  jq -r '[.[] | select(.open | length > 0)] as $c
-    | (([$c[] | select(.started) | .number] | min) // ([$c[].number] | min)) // empty'
+  jq -r '([.[] | select(.state == "to-verify") | .number] | min) as $v
+    | if $v != null then $v else
+      ([.[] | select(.open | length > 0)] as $c
+        | (([$c[] | select(.started) | .number] | min) // ([$c[].number] | min)) // empty) end'
 }
 
 # Pure. $1: open sub-issues at the start. Every sub-issue takes one run, plus room for a
 # discovered HITL (AFK run, then the HITL session) — so twice as many; the cap only guards
-# against a loop that never ends.
+# against a loop that never ends. An epic with nothing open starts at its weryfikacja: that run,
+# a "Poprawka" and the weryfikacja after it.
 ralph_epic_iteration_limit() {
-  echo $(( $1 * 2 ))
+  if [ "$1" -eq 0 ]; then echo 3; else echo $(( $1 * 2 )); fi
 }
 
 # Pure. Decision after one once.sh run. $1: its exit code; $2: runs done so far (this one
 # included); $3: limit; $4: "true" when the epic is now awaiting acceptance. Prints `continue`
 # or `stop-<reason>` (ready|afk-failed|hitl|nothing|error|limit|usage-limit). An error is never
-# masked by a ready epic; a failed AFK run is never masked by the limit.
+# masked by a ready epic; a failed AFK run is never masked by the limit. The weryfikacja's
+# "do odbioru" code is a ready epic by itself; its other outcome (a "Poprawka" opened, code 7)
+# goes on like any run, and counts as an iteration.
 ralph_epic_decision() {
   local code="$1" done_runs="$2" limit="$3" ready="$4"
   case "$code" in
@@ -1305,6 +1432,7 @@ ralph_epic_decision() {
     "$RALPH_EXIT_USAGE_LIMIT") echo stop-usage-limit; return 0 ;;
     "$RALPH_EXIT_AFK_FAILED") echo stop-afk-failed; return 0 ;;
     "$RALPH_EXIT_HITL_OPEN") echo stop-hitl; return 0 ;;
+    "$RALPH_EXIT_ACCEPTANCE") echo stop-ready; return 0 ;;
     "$RALPH_EXIT_DONE"|"$RALPH_EXIT_NOTHING"|"$RALPH_EXIT_DISCOVERED"|"$RALPH_EXIT_HITL_TO_AFK"|"$RALPH_EXIT_REVIEW_RETRY") ;;
     *) echo stop-error; return 0 ;;
   esac

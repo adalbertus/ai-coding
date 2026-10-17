@@ -196,7 +196,8 @@ stać w dowolnym miejscu. Strażnik i selektor zostają na Haiku.
 **Bramka po zamkniętym issue** (ADR 0018). Po każdym runie, który zamknął issue (AFK, sesja HITL,
 wznowiony worker), `ralph-once` sam uruchamia komendę z linii `ralph-gate:` w katalogu głównym repo,
 zanim uzna issue za zrobione. Kolejność: bramka → przy zielonej i `complexity:heavy` przegląd heavy
-→ oznaczenie epicu do odbioru → werdykt runu. Na ekranie: start, czas i wynik; pełne wyjście
+→ werdykt runu (epic nie dostaje już `needs-human-test` po ostatnim sub-issue — robi to weryfikacja
+epica, niżej). Na ekranie: start, czas i wynik; pełne wyjście
 w `.git/ralph-logs/<czas>-gate-<nr>.log`. Run, który zostawił issue otwarte, bramki nie uruchamia.
 - czerwona pierwszy raz — issue wraca otwarte z `ready-for-agent` i komentarzem (marker bramki,
   koniec wyjścia, ścieżka logu), epic nie dostaje `needs-human-test`, run kończy się kodem 7
@@ -355,15 +356,38 @@ zmiana (epic z jednym sub-issue). Terminologia: `CONTEXT.md` (**Epic**, **Odbió
    Potem zostaje tylko `ralph-epic <nr>`.
 3. **`ralph-once`** (albo `ralph-once-local`) w pętli z terminala — implementacja AFK, jedno
    sub-issue na run.
-4. **Odbiór** — pętla staje raz na epic, gdy skrypt oznaczy epic (ostatnie sub-issue zamknięte; patrz niżej).
+4. **Weryfikacja epica** — po zamknięciu ostatniego sub-issue pętla sama uruchamia bramkę na całym epicu (patrz niżej).
+5. **Odbiór** — pętla staje raz na epic, gdy weryfikacja oznaczy go `needs-human-test`.
 
 **Sub-issues i gate.** Sub-issue epicu worker zamyka sam po zielonym gate (doc-sync w tym samym
 commicie), bez względu na done-criteria o weryfikacji ręcznej — ta część przechodzi na odbiór epicu.
-Odchylenia od planu idą komentarzem do epicu (brak odchyleń = brak komentarza). Epic oznacza do odbioru
-skrypt, nie worker: przed wyborem issue i po runie workera pętla sprawdza epice, a epic bez
-otwartych sub-issues i bez `needs-human-test` dostaje tę etykietę i jeden komentarz — bez względu
-na to, kto zamknął ostatnie sub-issue (też ręcznie). `ralph-once <nr epicu>` na takim epicu
-oznacza go i nie uruchamia workera.
+Odchylenia od planu idą komentarzem do epicu (brak odchyleń = brak komentarza). Epica do odbioru
+nie oznacza już worker ani samo zamknięcie ostatniego sub-issue — robi to **weryfikacja epica**.
+
+**Weryfikacja epica** (ADR 0018, warstwa 2; na razie sama bramka, bez weryfikatora-modelu). Epic jest
+w jednym z czterech stanów (czysta funkcja `ralph_epic_state`): *niezaplanowany* (bez sub-issues —
+nie jest weryfikowany ani oznaczany), *w toku* (są otwarte sub-issues), *do weryfikacji* (≥1
+sub-issue, wszystkie zamknięte, bez `needs-human-test`) i *do odbioru* (ma `needs-human-test` —
+także epic oznaczony przed tą zmianą, bez markerów; nie jest weryfikowany ponownie). Epic *do
+weryfikacji* jest pracą: `ralph-epic` (z numerem i bez; bez numeru bierze taki epic przed epikami z
+otwartymi sub-issues) oraz `ralph-once <epic>` uruchamiają weryfikację, a `ralph-epic` robi to w tym
+samym przebiegu, w iteracji po zamknięciu ostatniego sub-issue. Weryfikacja liczy się jako iteracja.
+Zwykłe `ralph-once` bez numeru epicu nie weryfikuje.
+
+Przebieg: bramka (`ralph-gate:`, na gałęzi `epic/<nr>`, gdy repo ma `ralph-base-branch`; log w
+`.git/ralph-logs/<czas>-weryfikacja-<nr>.log`) → komentarz-marker rundy → decyzja. Numer rundy to
+liczba markerów rund weryfikacji od ostatniego markera rundy odbioru (zostawia go `/odbior`; tu
+tylko jest rozpoznawany) plus jeden.
+- bramka zielona → `needs-human-test` i komentarz z listą odbioru (na razie kroki `## Jak odebrać` z
+  epica i komenda `cd <worktree> && claude "/odbior <nr>"`); ta sama komenda kończy wyjście
+  `ralph-epic`; kod wyjścia 9;
+- bramka czerwona w rundzie 1 → sub-issue `[ISSUE] Poprawka: czerwona bramka` (`ready-for-agent`,
+  `complexity:normal`, koniec wyjścia i ścieżka logu), kod 7 — `ralph-epic` jedzie dalej, robi
+  poprawkę i weryfikuje drugi raz;
+- bramka czerwona w rundzie 2 → `needs-human-test` z czerwoną bramką na początku listy odbioru,
+  żadnej nowej „Poprawki”.
+Każdy nieudany zapis na GitHubie (marker, etykieta, sub-issue) to błąd (kod 1), nie ciche
+pominięcie — bez markera weryfikacja kręciłaby się w kółko.
 
 **Odbiór epicu.** `needs-human-test` na epicu to bezpiecznik: dopóki jest, pętla nie zaczyna nowej
 pracy. Przechodzisz scenariusz z `## Jak odebrać` i:
@@ -376,7 +400,8 @@ pracy. Przechodzisz scenariusz z `## Jak odebrać` i:
 **Wybór pracy.** W trybie pętli, jeśli istnieje **rozpoczęty epic** (co najmniej jedno zamknięte
 sub-issue) z otwartymi sub-issues, selektor dostaje tylko sub-issues najstarszego takiego epicu
 (filtr w `lib.sh`, czysta funkcja) — pętla dokańcza epic, zanim weźmie następny. `ralph-once <nr epicu>`
-pracuje nad sub-issue wskazanego epicu; epic bez otwartych sub-issues daje komunikat i wyjście bez
+pracuje nad sub-issue wskazanego epicu; epic bez otwartych sub-issues jest weryfikowany (gdy wszystkie
+są zamknięte i nie ma `needs-human-test`), a w pozostałych stanach daje komunikat i wyjście bez
 workera. Tak przeskakuje się na pilny epic.
 
 **Kolejność w epicu: AFK, potem HITL** (ADR 0013). `ralph-once <nr epicu>` najpierw bierze
@@ -393,13 +418,14 @@ runie, nie z wyniku procesu workera):
 |-----|-----------|
 | 0 | issue domknięte |
 | 1 | błąd lub odmowa: złe argumenty, brak issue, zajęty lock, strażnik, brudne drzewo, konflikt scalania, przegląd heavy bez werdyktu, brak linii `ralph-gate:` |
-| 2 | nic do zrobienia: bramka `needs-human-test`, epic w odbiorze, brak lub zablokowani kandydaci, `NO_TASK` |
+| 2 | nic do zrobienia: bramka `needs-human-test`, epic w odbiorze lub niezaplanowany, brak lub zablokowani kandydaci, `NO_TASK` |
 | 3 | run AFK zostawił issue otwarte i nadal z `ready-for-agent` (porażka, praca niedokończona; także drugi odrzut przeglądu heavy albo druga czerwona bramka) |
 | 4 | run AFK zostawił issue otwarte bez `ready-for-agent` (odkryty HITL) |
 | 5 | sesja HITL skończona, issue otwarte i bez `ready-for-agent` (nierozwiązane) |
 | 6 | sesja HITL skończona, issue otwarte z przywróconym `ready-for-agent` (wraca do AFK) |
-| 7 | przegląd heavy odrzucił issue albo bramka była czerwona pierwszy raz: otwarte ponownie z uwagami, poprawka w następnym runie |
+| 7 | przegląd heavy odrzucił issue albo bramka była czerwona pierwszy raz: otwarte ponownie z uwagami, poprawka w następnym runie; także weryfikacja epica z czerwoną bramką w rundzie 1 (założona „Poprawka”) |
 | 8 | limit użycia przerwał run, a reset jest dalej niż 6 h; ślad zostaje do wznowienia (niżej) |
+| 9 | weryfikacja epica oddała epic do odbioru (`needs-human-test` i lista odbioru ustawione); `ralph-epic` staje jak przy epicu gotowym do odbioru |
 
 **Wznowienie po limicie użycia** (tylko Claude, ADR 0017). Gdy worker albo przegląd heavy trafi
 na wyczerpany limit konta (np. pięciogodzinne okno w nocy), to nie jest porażka. Ralph zapisuje
@@ -433,7 +459,7 @@ powiadomień).
 
 | Stop | Komunikat | Co robisz |
 |------|-----------|-----------|
-| epic w odbiorze (kod 0) | „Epic #N gotowy do odbioru” | przechodzisz `## Jak odebrać`, mówisz „zamykaj” albo zgłaszasz uwagi |
+| epic w odbiorze (kod 9 po weryfikacji, albo epic już z `needs-human-test`) | „Epic #N gotowy do odbioru” i komenda `cd <worktree> && claude "/odbior N"` | przechodzisz `## Jak odebrać`, mówisz „zamykaj” albo zgłaszasz uwagi |
 | AFK nie domknęło issue (3) | numer issue i wskazanie komentarza workera | czytasz komentarz i logi w `.git/ralph-logs/`, poprawiasz przyczynę (albo issue) i uruchamiasz ponownie; pętla nie pomija issue |
 | HITL nierozwiązane (5) | numer issue | rozstrzygasz: domykasz albo przywracasz `ready-for-agent`, uruchamiasz ponownie |
 | nic do zrobienia (2) | lista otwartych sub-issues (HITL oznaczone) | odblokuj je, dodaj decyzję lub `ready-for-agent`, uruchom ponownie |
@@ -443,8 +469,8 @@ powiadomień).
 
 Sesja HITL rozwiązana (issue domknięte albo z przywróconym `ready-for-agent`) i odkryty HITL
 (kod 4) nie zatrzymują pętli — idzie następna iteracja. Limit iteracji to dwukrotność liczby
-otwartych sub-issues na starcie (zapas na sesję HITL po odkryciu); chroni tylko przed pętlą bez
-końca. Kod: `ralph/epic.sh`; testy: `ralph/test/epic.test.sh` (atrapa `once.sh`, fałszywe `gh`).
+otwartych sub-issues na starcie (zapas na sesję HITL po odkryciu; dla epicu *do weryfikacji* 3:
+weryfikacja, „Poprawka”, weryfikacja); chroni tylko przed pętlą bez końca. Kod: `ralph/epic.sh`; testy: `ralph/test/epic.test.sh` (atrapa `once.sh`, fałszywe `gh`).
 
 **Blokery rozstrzyga skrypt.** Bloker to natywna relacja GitHuba „blocked by” (zakłada ją
 `to-issues-ralph`; ręcznie: „Mark as blocked by” w issue). Sekcja „Blocked by” w treści to tylko

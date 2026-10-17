@@ -664,11 +664,53 @@ expect_eq "blocked report: one line per issue with its open blockers" \
   #9 ← #3, #6"
 rm -rf "$fake_gh_dir"
 
-# --- ralph_epic_ready_to_mark: pure decision (total sub-issues, open sub-issues, has label) ---
-expect_ok "mark: all closed, no label -> mark" ralph_epic_ready_to_mark 3 0 false
-expect_fail "mark: label already there -> no" ralph_epic_ready_to_mark 3 0 true
-expect_fail "mark: open sub-issues -> no" ralph_epic_ready_to_mark 3 1 false
-expect_fail "mark: epic without any sub-issues -> no" ralph_epic_ready_to_mark 0 0 false
+# --- Weryfikacja epica (ADR 0018): the epic's state, the round, the decision (pure) ---
+# ralph_epic_state: total sub-issues, open sub-issues, has needs-human-test.
+expect_eq "state: 3 sub-issues, all closed, no label -> to-verify" "$(ralph_epic_state 3 0 false)" "to-verify"
+expect_eq "state: open sub-issues -> in-progress" "$(ralph_epic_state 3 1 false)" "in-progress"
+expect_eq "state: no sub-issues -> unplanned (neither verified nor labelled)" "$(ralph_epic_state 0 0 false)" "unplanned"
+expect_eq "state: label present -> awaiting, not verified again" "$(ralph_epic_state 3 0 true)" "awaiting"
+expect_eq "state: an epic labelled before the change (no markers) stays awaiting" "$(ralph_epic_state 2 0 true)" "awaiting"
+expect_eq "state: label wins over open sub-issues (a Poprawka added while awaiting)" "$(ralph_epic_state 3 1 true)" "awaiting"
+
+VM="$RALPH_VERIFY_MARKER"; OM="$RALPH_ODBIOR_MARKER"
+round_of() { jq -c -n '$ARGS.positional | map({body: .})' --args "$@" | ralph_verify_round; }
+expect_eq "round: no comments -> 1" "$(round_of)" "1"
+expect_eq "round: unrelated comments only -> 1" "$(round_of 'odchylenie' 'inny komentarz')" "1"
+expect_eq "round: one verification marker -> 2" "$(round_of "$VM
+runda 1")" "2"
+expect_eq "round: two verification markers -> 3" "$(round_of "$VM" 'x' "$VM")" "3"
+expect_eq "round: acceptance marker after two rounds, then a Poprawka -> next verification is round 1" \
+  "$(round_of "$VM" "$VM" "$OM" 'inny')" "1"
+expect_eq "round: one round after the acceptance marker -> 2" "$(round_of "$VM" "$VM" "$OM" "$VM")" "2"
+expect_eq "round: the acceptance marker alone -> 1" "$(round_of "$OM")" "1"
+
+expect_eq "verify decision: green in round 1 -> accept" "$(ralph_verify_decision 0 1)" "accept"
+expect_eq "verify decision: green in round 2 -> accept" "$(ralph_verify_decision 0 2)" "accept"
+expect_eq "verify decision: red in round 1 -> fix" "$(ralph_verify_decision 1 1)" "fix"
+expect_eq "verify decision: red in round 2 -> accept-red (no new Poprawka)" "$(ralph_verify_decision 1 2)" "accept-red"
+expect_eq "verify decision: red in round 3 -> accept-red" "$(ralph_verify_decision 5 3)" "accept-red"
+
+expect_eq "steps: the Jak odebrać section of an epic body, without the heading and the next section" \
+  "$(printf '## Solution\nx\n\n## Jak odebrać\n\n1. Pierwszy\n2. Drugi\n\n## Inne\nnie to\n' | ralph_epic_acceptance_steps)" $'1. Pierwszy\n2. Drugi'
+expect_eq "steps: no section -> nothing" "$(printf '## Solution\nx\n' | ralph_epic_acceptance_steps)" ""
+expect_eq "acceptance command: cd <worktree> && claude \"/odbior <nr>\"" \
+  "$(ralph_acceptance_command 45 /tmp/wt)" 'cd /tmp/wt && claude "/odbior 45"'
+wt_dir="$(mktemp -d)/my wt"; mkdir "$wt_dir"
+expect_eq "acceptance command: a worktree path with a space still cd's into it" \
+  "$(bash -c "$(ralph_acceptance_command 45 "$wt_dir" | sed 's/ && claude.*//') && pwd")" "$wt_dir"
+rm -rf "${wt_dir%/my wt}"
+list_green=$(ralph_acceptance_list 45 "1. Krok" 'cd /w && claude "/odbior 45"')
+expect_eq "acceptance list: steps and the command, the marker first, no unresolved section" \
+  "$(head -1 <<<"$list_green")|$(grep -c '1. Krok' <<<"$list_green")|$(grep -c 'odbior 45' <<<"$list_green")|$(grep -c 'Nierozwiązane' <<<"$list_green")" \
+  "$RALPH_ACCEPT_LIST_MARKER|1|1|0"
+list_red=$(ralph_acceptance_list 45 "1. Krok" 'cd /w && claude "/odbior 45"' 'make test' 3 'FAIL: x' /tmp/g.log)
+expect_eq "acceptance list: a red gate goes before the steps" \
+  "$(grep -nE 'Nierozwiązane|Kroki' <<<"$list_red" | cut -d: -f2 | paste -sd, -)" "### Nierozwiązane,### Kroki (## Jak odebrać)"
+expect_eq "acceptance list: the red gate names its command, code, output and log" \
+  "$(grep -c 'make test' <<<"$list_red")|$(grep -c 'kod 3' <<<"$list_red")|$(grep -c 'FAIL: x' <<<"$list_red")|$(grep -c '/tmp/g.log' <<<"$list_red")" "1|1|1|1"
+expect_eq "acceptance list: the lists carry no round marker (they would reset or advance the count)" \
+  "$(grep -cE 'ralph-weryfikacja|ralph-odbior' <<<"$list_red$list_green")" "0"
 
 # --- ralph-epic: pure decisions (args: exit code, iterations done, limit, epic ready "true"/"false") ---
 dec() { ralph_epic_decision "$@"; }
@@ -990,8 +1032,8 @@ after_worker_case() {
     rm -rf "$repo" "$SEQ_CALLS" "$SEQ_COMMENTS"
   )
 }
-expect_eq "after worker: last sub-issue closed, gate green -> exit 0, epic marked after the gate" \
-  "$(after_worker_case "$GATE_OK")" "0|gate,label-epic,comment-epic"
+expect_eq "after worker: last sub-issue closed, gate green -> exit 0, the epic is NOT labelled (only the weryfikacja does)" \
+  "$(after_worker_case "$GATE_OK")" "0|gate"
 expect_eq "after worker: last sub-issue closed, gate red -> exit 7, issue reopened, epic NOT marked" \
   "$(after_worker_case "$GATE_RED")" "7|gate,gate,reopen,ready,comment"
 expect_eq "after worker: second red on the same issue -> exit 3, epic NOT marked" \
@@ -1002,10 +1044,148 @@ expect_eq "after worker: no ralph-gate: line on a heavy issue -> exit 1, no revi
   "$(after_worker_case '' heavy)" "1|"
 expect_eq "after worker: heavy, gate red -> no przegląd, exit 7, epic NOT marked" \
   "$(after_worker_case "$GATE_RED" heavy)" "7|gate,gate,reopen,ready,comment"
-expect_eq "after worker: heavy, gate green, przegląd OK -> gate, then przegląd, then the epic" \
-  "$(after_worker_case "$GATE_OK" heavy)" "0|gate,review,label-epic,comment-epic"
+expect_eq "after worker: heavy, gate green, przegląd OK -> gate, then przegląd, epic NOT labelled" \
+  "$(after_worker_case "$GATE_OK" heavy)" "0|gate,review"
 expect_eq "after worker: heavy, gate green, przegląd FAIL -> exit 7, epic NOT marked" \
   "$(after_worker_case "$GATE_OK" heavy fail)" "7|gate,review"
+
+# --- ralph-epic: decision for the weryfikacja's exit codes, the pick and the limit ---
+expect_eq "decision: 9 (weryfikacja handed the epic to acceptance) -> stop-ready, even without the label read yet" \
+  "$(dec 9 1 5 false)" "stop-ready"
+expect_eq "decision: 9 at the limit -> still stop-ready (not stop-limit)" "$(dec 9 5 5 false)" "stop-ready"
+expect_eq "decision: 7 from the weryfikacja (Poprawka opened) -> continue" "$(dec 7 3 5 false)" "continue"
+expect_eq "decision: weryfikacja counted as an iteration -> 7 at the limit -> stop-limit, no label" "$(dec 7 5 5 false)" "stop-limit"
+expect_eq "limit: an epic with nothing open still has room for weryfikacja, Poprawka and weryfikacja" "$(ralph_epic_iteration_limit 0)" "3"
+E_VER='[{"number":10,"started":true,"open":[12],"state":"in-progress"},{"number":20,"started":false,"open":[21],"state":"in-progress"},{"number":30,"started":true,"open":[],"state":"to-verify"},{"number":40,"started":true,"open":[],"state":"awaiting"},{"number":50,"started":false,"open":[],"state":"unplanned"}]'
+expect_eq "pick epic: a started epic waiting for weryfikacja goes before another with open sub-issues" \
+  "$(ralph_pick_epic <<<"$E_VER")" "30"
+expect_eq "pick epic: only to-verify -> that one" \
+  "$(ralph_pick_epic <<<'[{"number":30,"started":true,"open":[],"state":"to-verify"}]')" "30"
+expect_eq "pick epic: awaiting acceptance and unplanned epics are never picked" \
+  "$(ralph_pick_epic <<<'[{"number":40,"started":true,"open":[],"state":"awaiting"},{"number":50,"started":false,"open":[],"state":"unplanned"}]')" ""
+expect_eq "pick epic: lowest of several to-verify" \
+  "$(ralph_pick_epic <<<'[{"number":9,"started":true,"open":[],"state":"to-verify"},{"number":4,"started":true,"open":[],"state":"to-verify"}]')" "4"
+
+# ralph_epics_json: the state of every open [PRD] from its sub-issues and its label.
+epics_gh() {
+  case "$*" in
+    "issue list --state open"*) printf '10\n20\n30\n40\n' ;;
+    "api --paginate repos/{owner}/{repo}/issues/10/sub_issues") echo '[{"number":11,"state":"closed"},{"number":12,"state":"open"}]' ;;
+    "api --paginate repos/{owner}/{repo}/issues/20/sub_issues") echo '[{"number":21,"state":"closed"},{"number":22,"state":"closed"}]' ;;
+    "api --paginate repos/{owner}/{repo}/issues/30/sub_issues") echo '[]' ;;
+    "api --paginate repos/{owner}/{repo}/issues/40/sub_issues") echo '[{"number":41,"state":"closed"}]' ;;
+    "issue view 40 --json labels"*) echo true ;;
+    "issue view "*" --json labels"*) echo false ;;
+  esac
+}
+epics_state=$( gh() { epics_gh "$@"; }; ralph_epics_json | jq -r 'map("\(.number)=\(.state)") | join(",")' )
+expect_eq "epics json: in-progress, to-verify, unplanned (no sub-issues), awaiting (label)" \
+  "$epics_state" "10=in-progress,20=to-verify,30=unplanned,40=awaiting"
+expect_eq "epics json: started and open lists kept" \
+  "$( gh() { epics_gh "$@"; }; ralph_epics_json | jq -c '.[0] | [.started, .open]')" '[true,[12]]'
+expect_eq "epics json: a label GitHub cannot answer about -> awaiting, never to-verify" \
+  "$( gh() { case "$*" in "issue list --state open"*) echo 20 ;; "issue view"*) return 1 ;; *) epics_gh "$@" ;; esac; }; ralph_epics_json | jq -r '.[0].state')" "awaiting"
+
+# ralph_verify_epic end to end in a throwaway repo whose CLAUDE.md declares the gate; gh is a stub
+# that keeps the epic's comments like GitHub. $1: gate command (empty = section without the line),
+# $2: the epic's earlier comments (one body per line, \n for newlines), $3: failing gh call
+# (comments|marker|create|label, or none). Prints "<RALPH_VERIFY_EXIT>|<calls>"; the full text of
+# the comments written lands in $VERIFY_OUT, the issue created in $VERIFY_CREATE.
+VERIFY_BODY=$'## Solution\nx\n\n## Jak odebrać\n\n1. Otwórz stronę\n2. Kliknij OK\n\n## Out of Scope\nnic'
+verify_gh() {
+  case "$*" in
+    "api --paginate repos/{owner}/{repo}/issues/45/comments")
+      [ "$v_fail" = comments ] && return 1
+      jq -s -c . "$V_COMMENTS" ;;
+    "issue comment 45 --body "*)
+      case "${*#issue comment 45 --body }" in
+        *"$RALPH_VERIFY_MARKER"*) [ "$v_fail" = marker ] && return 1; echo marker >> "$V_CALLS" ;;
+        *) echo list >> "$V_CALLS" ;;
+      esac
+      jq -c -n --arg b "${*#issue comment 45 --body }" '{body: $b}' >> "$V_COMMENTS"
+      printf '%s\n----\n' "${*#issue comment 45 --body }" >> "$VERIFY_OUT" ;;
+    "issue edit 45 --add-label needs-human-test") [ "$v_fail" = label ] && return 1; echo label >> "$V_CALLS" ;;
+    "issue view 45 --json body"*) printf '%s\n' "$VERIFY_BODY" ;;
+    "label create"*) ;;
+    "issue create "*)
+      [ "$v_fail" = create ] && return 1
+      echo create >> "$V_CALLS"; printf '%s\n' "$*" > "$VERIFY_CREATE" ;;
+  esac
+}
+verify_case() {
+  local v_cmd="$1" v_prior="${2:-}" v_fail="${3:-none}" line
+  (
+    repo=$(mktemp -d); cd "$repo" && git init -q
+    if [ -n "$v_cmd" ]; then printf '# T\n\n## Ralph\n\nralph-gate: %s\n' "$v_cmd" > CLAUDE.md
+    else printf '# T\n\n## Ralph\n\nbez linii bramki\n' > CLAUDE.md; fi
+    export V_CALLS V_COMMENTS VERIFY_OUT VERIFY_CREATE
+    V_CALLS=$(mktemp); V_COMMENTS=$(mktemp); VERIFY_OUT=$(mktemp); VERIFY_CREATE=$(mktemp)
+    while IFS= read -r line; do
+      [ -n "$line" ] && jq -c -n --arg b "$(printf '%b' "$line")" '{body: $b}' >> "$V_COMMENTS"
+    done <<<"$v_prior"
+    gh() { verify_gh "$@"; }
+    ralph_verify_epic 45 >"$repo/stdout" 2>&1
+    printf '%s|%s' "$RALPH_VERIFY_EXIT" "$(paste -sd, "$V_CALLS")"
+    cp "$VERIFY_OUT" /tmp/ralph-verify-out.$$; cp "$VERIFY_CREATE" /tmp/ralph-verify-create.$$; cp "$repo/stdout" /tmp/ralph-verify-stdout.$$
+    rm -rf "$repo" "$V_CALLS" "$V_COMMENTS" "$VERIFY_OUT" "$VERIFY_CREATE"
+  )
+}
+V_GATE_OK='echo gate >> "$V_CALLS"; echo "wszystko zielone"'
+V_GATE_RED='echo gate >> "$V_CALLS"; echo "FAIL: test d""ziwny"; exit 3'
+verify_artifacts() { # reads the files verify_case left (named by the subshell's pid) -> sets v_out, v_create, v_stdout
+  v_out=$(cat /tmp/ralph-verify-out.* 2>/dev/null); v_create=$(cat /tmp/ralph-verify-create.* 2>/dev/null); v_stdout=$(cat /tmp/ralph-verify-stdout.* 2>/dev/null)
+  rm -f /tmp/ralph-verify-out.* /tmp/ralph-verify-create.* /tmp/ralph-verify-stdout.*
+}
+
+expect_eq "verify: gate green, round 1 -> marker, label, acceptance list; exit 9 (do odbioru)" \
+  "$(verify_case "$V_GATE_OK")" "9|gate,marker,label,list"
+verify_artifacts
+expect_eq "  the list holds the Jak odebrać steps, not the rest of the epic body" \
+  "$(grep -c '1. Otwórz stronę' <<<"$v_out")|$(grep -c 'Out of Scope' <<<"$v_out")" "1|0"
+expect_eq "  the list holds the command with /odbior <nr>, and so does the screen" \
+  "$(grep -c 'claude "/odbior 45"' <<<"$v_out")|$(grep -c 'claude "/odbior 45"' <<<"$v_stdout")" "1|1"
+expect_eq "  the command ends the screen output" "$(tail -1 <<<"$v_stdout" | grep -c 'claude "/odbior 45"')" "1"
+expect_eq "  the round marker comment says round 1" "$(grep -c 'runda 1' <<<"$v_out")" "1"
+
+expect_eq "verify: gate red, round 1 -> marker, one Poprawka sub-issue, NO label; exit 7 (ralph-epic goes on)" \
+  "$(verify_case "$V_GATE_RED")" "7|gate,marker,create"
+verify_artifacts
+expect_eq "  Poprawka: title, ready-for-agent, complexity:normal, parent = the epic" \
+  "$(grep -c -e '--title \[ISSUE\] Poprawka: czerwona bramka' <<<"$v_create")|$(grep -c -e '--label ready-for-agent' <<<"$v_create")|$(grep -c -e '--label complexity:normal' <<<"$v_create")|$(grep -c -e '--parent 45' <<<"$v_create")" "1|1|1|1"
+expect_eq "  Poprawka: the tail of the output and the log path" \
+  "$(grep -c 'FAIL: test dziwny' <<<"$v_create")|$(grep -c 'weryfikacja-45.log' <<<"$v_create")" "1|1"
+expect_eq "  the epic gets no acceptance list" "$(grep -c 'Lista odbioru' <<<"$v_out")" "0"
+
+expect_eq "verify: gate red, round 2 (one earlier round) -> label with the red gate on top of the list; exit 9; no new Poprawka" \
+  "$(verify_case "$V_GATE_RED" "$RALPH_VERIFY_MARKER runda 1")" "9|gate,marker,label,list"
+verify_artifacts
+expect_eq "  the red gate is listed before the steps" \
+  "$(grep -nE 'Nierozwiązane|Kroki' <<<"$v_out" | cut -d: -f2 | paste -sd, -)" "### Nierozwiązane,### Kroki (## Jak odebrać)"
+expect_eq "  and names the failing output" "$(grep -c 'FAIL: test dziwny' <<<"$v_out")" "1"
+expect_eq "  the round marker comment says round 2" "$(grep -c 'runda 2' <<<"$v_out")" "1"
+
+expect_eq "verify: acceptance marker after two rounds, then a Poprawka -> red again is round 1: Poprawka again, no label" \
+  "$(verify_case "$V_GATE_RED" "$RALPH_VERIFY_MARKER 1\n$RALPH_VERIFY_MARKER 2\n$RALPH_ODBIOR_MARKER\nzamknięta Poprawka")" "7|gate,marker,create"
+verify_artifacts
+expect_eq "verify: gate green after a fresh acceptance marker -> round 1 marker" \
+  "$(verify_case "$V_GATE_OK" "$RALPH_VERIFY_MARKER 1\n$RALPH_VERIFY_MARKER 2\n$RALPH_ODBIOR_MARKER")" "9|gate,marker,label,list"
+verify_artifacts
+expect_eq "  and says so" "$(grep -c 'runda 1' <<<"$v_out")" "1"
+
+expect_eq "verify: no ralph-gate: line -> error, nothing run, nothing written" "$(verify_case '')" "1|"
+verify_artifacts
+expect_eq "verify: comments unreadable -> error before the gate (the round number is unknown)" \
+  "$(verify_case "$V_GATE_OK" '' comments)" "1|"
+verify_artifacts
+expect_eq "verify: the round marker cannot be written -> error, no label and no Poprawka (it would verify forever)" \
+  "$(verify_case "$V_GATE_RED" '' marker)" "1|gate"
+verify_artifacts
+expect_eq "verify: green, label cannot be set -> error, no acceptance list" \
+  "$(verify_case "$V_GATE_OK" '' label)" "1|gate,marker"
+verify_artifacts
+expect_eq "verify: red, Poprawka cannot be created -> error" \
+  "$(verify_case "$V_GATE_RED" '' create)" "1|gate,marker"
+verify_artifacts
 
 # --- Limit użycia (ADR 0017) ---
 LIMIT_FIXTURE="$SCRIPT_DIR/fixtures/usage-limit.jsonl"
@@ -1161,16 +1341,16 @@ resume_seq_case() {
     rm -rf "$repo" "$SEQ_CALLS" "$SEQ_COMMENTS"
   )
 }
-expect_eq "resume: worker phase, the worker closes the issue, gate green -> gate runs once, epic marked" \
-  "$(resume_seq_case worker "$GATE_OK")" "0|worker:$SID,gate,label-epic,comment-epic"
+expect_eq "resume: worker phase, the worker closes the issue, gate green -> gate runs once, epic NOT labelled" \
+  "$(resume_seq_case worker "$GATE_OK")" "0|worker:$SID,gate"
 expect_eq "resume: worker phase, gate red -> issue reopened, no przegląd, epic NOT marked" \
   "$(resume_seq_case worker "$GATE_RED" heavy)" "7|worker:$SID,gate,gate,reopen,ready,comment"
 expect_eq "resume: worker phase, heavy, gate green -> przegląd follows the gate" \
-  "$(resume_seq_case worker "$GATE_OK" heavy)" "0|worker:$SID,gate,review:,label-epic,comment-epic"
+  "$(resume_seq_case worker "$GATE_OK" heavy)" "0|worker:$SID,gate,review:"
 expect_eq "resume: worker phase, no ralph-gate: line -> exit 1, epic NOT marked" \
   "$(resume_seq_case worker '')" "1|worker:$SID"
 expect_eq "resume: przegląd phase -> przegląd is not skipped, resumes the ślad's session, gate not rerun" \
-  "$(resume_seq_case review "$GATE_RED" heavy)" "0|review:$SID,label-epic,comment-epic"
+  "$(resume_seq_case review "$GATE_RED" heavy)" "0|review:$SID"
 expect_eq "resume: przegląd phase, FAIL -> exit 7, epic NOT marked" \
   "$(resume_seq_case review "$GATE_OK" heavy fail)" "7|review:$SID"
 expect_eq "resume: no ślad -> returns 1 and runs nothing" \
