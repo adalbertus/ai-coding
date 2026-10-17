@@ -1,6 +1,6 @@
 ---
 name: to-issues-ralph
-description: Turn a finished grill into a published Ralph-loop epic in one non-interactive run — publishes the PRD as a parent `[PRD]` issue with an acceptance scenario (`## Jak odebrać`), breaks it into vertical slices published as native sub-issues of that epic, then adds complexity triage per sub-issue — and, for each heavy one, the list of cases its tests must cover. Asks no questions. Every piece of work is an epic, even a one-line change. Use after a grill session to convert a plan/PRD into issues the Ralph autonomous loop (ralph/once.sh) will implement, or when the user mentions Ralph, epic, complexity triage, or per-issue model selection.
+description: Turn a finished grill into a published Ralph-loop epic in one non-interactive run — publishes the PRD as a parent `[PRD]` issue with an acceptance scenario (`## Jak odebrać`), breaks it into vertical slices published as native sub-issues of that epic, then adds complexity triage per sub-issue — and, for each heavy one, the list of cases its tests must cover. Asks no questions. Called with an issue number (`/to-issues-ralph <nr>`), it breaks down an existing epic in a fresh session, reading the PRD from the epic's body. Every piece of work is an epic, even a one-line change. Use after a grill session to convert a plan/PRD into issues the Ralph autonomous loop (ralph/once.sh) will implement, or when the user mentions Ralph, epic, complexity triage, or per-issue model selection.
 ---
 
 # To Issues (Ralph)
@@ -13,6 +13,21 @@ an epic with a single sub-issue (ADR 0012).
 It does not reimplement PRD synthesis or breakdown — it **delegates** to `to-prd` and
 `to-issues`, wrapping each call with an override that suppresses their interactive
 checkpoints. Delegating (not copying) means upstream changes keep working here.
+
+## Invocation with an epic number
+
+`/to-issues-ralph <nr>` breaks down an **existing** epic in a fresh session; with no argument,
+run the whole chain below from step 1.
+
+1. Fetch the issue: `gh issue view <nr> --json number,title,body`.
+2. Check the preconditions. If either fails, print one message saying which and why, create
+   nothing, and stop:
+   - the title starts with `[PRD]` — otherwise it is not an epic;
+   - it has no sub-issues yet — `gh api "repos/{owner}/{repo}/issues/<nr>/sub_issues" --jq length`
+     must be `0`; otherwise the epic is already broken down.
+3. The PRD is **only** the epic's body. Do not read a file or rely on the conversation. Do not
+   run step 1 (the epic exists); use that PRD as the input to step 2 with epic number `<nr>`,
+   then continue with steps 3–5 and the report unchanged.
 
 ## Workflow
 
@@ -34,7 +49,8 @@ checkpoints. Delegating (not copying) means upstream changes keep working here.
 
 2. **Run the breakdown non-interactively.** Invoke the `to-issues` skill with this override:
    > Run `to-issues` **non-interactively** from the PRD synthesized in step 1 (already in
-   > context — do not look for a file). Do NOT perform its step 4 (Quiz the user) and do NOT
+   > context — do not look for a file; when invoked with an epic number, the PRD is the
+   > epic's body). Do NOT perform its step 4 (Quiz the user) and do NOT
    > wait for approval — treat the breakdown as approved and proceed straight to publishing.
    > This countermands `to-issues`' "Iterate until the user approves." Publish every slice as
    > a native sub-issue of the epic from step 1: set the parent with

@@ -319,7 +319,8 @@ zmiana (epic z jednym sub-issue). Terminologia: `CONTEXT.md` (**Epic**, **Odbió
    scenariuszem `## Jak odebrać`, label `ready-for-agent`) oraz sub-issues (vertical slices)
    z natywnymi relacjami „blocked by” i triage `complexity:*`; sub-issue `heavy` dostaje listę
    przypadków do przetestowania. Sub-issues nie mają sekcji ręcznej — scenariusz jest jeden,
-   w epicu.
+   w epicu. `/to-issues-ralph <nr>` robi samo rozbicie istniejącego epica w świeżej sesji (PRD
+   z treści epica); odmawia, gdy to nie `[PRD]` albo epic ma już sub-issues.
    Po tym kroku nie musisz nic robić poza uruchomieniem pętli.
 3. **`ralph-once`** (albo `ralph-once-local`) w pętli z terminala — implementacja AFK, jedno
    sub-issue na run.
