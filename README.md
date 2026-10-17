@@ -1,4 +1,4 @@
-# ai-coding — skille Claude/Codex + współdzielony Ralph
+# ai-coding — skille Claude/Codex + współdzielony Ralph (tylko Claude)
 
 Globalne narzędzia do pracy z agentami kodującymi w **jednym wątku na repo**:
 
@@ -6,12 +6,12 @@ Globalne narzędzia do pracy z agentami kodującymi w **jednym wątku na repo**:
   ale `install.sh` ich nie linkuje (zob. [Wyłączone skille](#wyłączone-skille)).
 - **Współdzielony Ralph** — jedna autonomiczna pętla implementacyjna dla wszystkich repo,
   niezależnie od stacku. Specyfika repo (jak testować, kiedy „gotowe") siedzi w sekcji
-  `## Ralph` w natywnym pliku agenta (`CLAUDE.md` / `AGENTS.md`), a nie w kopii skryptu.
+  `## Ralph` w `CLAUDE.md` repo, a nie w kopii skryptu. Ralph działa wyłącznie w Claude.
 - **Skille Ralpha** — `ralph-konfiguracja` (setup repo) i `to-issues-ralph` (triage zadań).
 
 Design: `CONTEXT.md` (słownik), `docs/adr/0001` (warstwowy fallback `/podsumuj`),
 `docs/adr/0002` (współdzielony Ralph: prompty agnostyczne + config w CLAUDE.md),
-`docs/adr/0009` (Claude/Codex przez wspólny rdzeń i adaptery runtime'u).
+`docs/adr/0020` (Codex poza Ralphem: pętla tylko dla Claude, Codex to runtime skilli).
 
 ## Instalacja
 
@@ -52,18 +52,18 @@ codex plugin add ai-coding --marketplace ai-coding-local
 
 ### Etap 2 — raz na każde repo, w którym chcesz Ralpha
 
-Repo bez Ralpha potrzebuje tylko sekcji `## Ralph` w swoim `CLAUDE.md` i `AGENTS.md` — inaczej
+Repo bez Ralpha potrzebuje tylko sekcji `## Ralph` w swoim `CLAUDE.md` — inaczej
 strażnik jest fail-closed i `ralph-once` od razu halt-uje. Sekcję pisze
-`/ralph-konfiguracja` albo `$ralph-konfiguracja`:
+`/ralph-konfiguracja` (w Claude):
 
 ```bash
 cd ~/projects/repo-laravel            # repo nr 1 — stack PHP/Laravel, jeszcze bez Ralpha
-# w sesji Claude albo Codex: /ralph-konfiguracja lub $ralph-konfiguracja
-#   → wykrywa stack (composer test / pint), pisze ## Ralph do CLAUDE.md i AGENTS.md, tworzy labelki
+# w sesji Claude: /ralph-konfiguracja
+#   → wykrywa stack (composer test / pint), pisze ## Ralph do CLAUDE.md, tworzy labelki
 ralph-once                            # pętla rusza, bo ## Ralph już jest
 
 cd ~/projects/repo-expo               # repo nr 2 — stack RN/Expo, jeszcze bez Ralpha
-# w sesji Claude albo Codex: /ralph-konfiguracja lub $ralph-konfiguracja
+# w sesji Claude: /ralph-konfiguracja
 #   → wykrywa stack (npm typecheck/lint/test + needs-human-test), pisze ## Ralph, tworzy labelki
 ralph-once
 ```
@@ -171,8 +171,8 @@ znikają przy przesiadce na inną maszynę.
 ## Współdzielony Ralph
 
 Pętla bierze **jedno** zadanie, implementuje je, uruchamia feedback loops i commituje — AFK
-(away-from-keyboard), z terminala. Ralph uruchamia wyłącznie Claude (ADR 0020); argument
-`claude` można pominąć, a `codex` kończy przebieg komunikatem i niezerowym kodem:
+(away-from-keyboard), z terminala. Ralph uruchamia wyłącznie Claude (ADR 0020); Codex jest
+tylko runtime'em skilli. Argument `claude` można pominąć:
 
 ```bash
 ralph-once 224          # Claude jest domyślny
@@ -211,11 +211,8 @@ workerze i po przeglądzie run wypisuje koszt (`Koszt workera: $…`).
 
 Przed wyborem zadania i workerem oba przechodzą przez **strażnika** (`ralph/preflight.sh`,
 fail-closed; w `ralph-once` po locku i bramce `needs-human-test`): repo musi mieć gotową sekcję
-`## Ralph` w natywnym pliku runtime'u (`CLAUDE.md` dla Claude, `AGENTS.md` dla Codex), inaczej
-pętla halt-uje z instrukcją konfiguracji. Gdy repo ma oba pliki i oba deklarują `## Ralph`,
-strażnik dodatkowo pilnuje, żeby te sekcje były **identyczne** — rozjazd oznacza, że rzadziej
-używany runtime pracuje na nieaktualnych regułach (np. commituje na inną gałąź), więc run pada
-z diffem i kieruje do `/ralph-konfiguracja`.
+`## Ralph` w `CLAUDE.md` (`AGENTS.md` jest ignorowany), inaczej pętla halt-uje z instrukcją
+konfiguracji `/ralph-konfiguracja`.
 
 Claude jedzie **bez nadzoru**: `claude -p` w **auto mode** (`--permission-mode auto`) ze
 strumieniowym wyjściem JSON. Worker kończy się sam po domknięciu issue.
@@ -286,7 +283,7 @@ pyta, czy przerwać, czy zakończyć tamten proces; non-interactive zawsze przer
 żyje, interaktywny run pyta o usunięcie stale locka, a non-interactive usuwa go i kontynuuje.
 Równoległe przebiegi rób przez osobne worktree/branche.
 
-### Kontrakt `## Ralph` (w `CLAUDE.md` / `AGENTS.md` repo)
+### Kontrakt `## Ralph` (w `CLAUDE.md` repo)
 
 Prompty są stack-agnostyczne — całą specyfikę repo delegują do sekcji `## Ralph`:
 
@@ -316,9 +313,9 @@ Jednostką odbioru jest **epic** (rodzic `[PRD]` z natywnymi sub-issues GitHuba)
 issue — szczegóły i uzasadnienie w `docs/adr/0012`. Każda praca jest epicem, także jednolinijkowa
 zmiana (epic z jednym sub-issue). Terminologia: `CONTEXT.md` (**Epic**, **Odbiór**).
 
-1. **`/ralph-konfiguracja` / `$ralph-konfiguracja`** — raz na repo. Wykrywa stack, pisze
-   `## Ralph` do `CLAUDE.md` i `AGENTS.md`, tworzy labelki pętli na GitHubie.
-2. **`/to-issues-ralph` / `$to-issues-ralph`** — z planu/PRD publikuje epic (`[PRD]` z PRD i
+1. **`/ralph-konfiguracja`** — raz na repo. Wykrywa stack, pisze
+   `## Ralph` do `CLAUDE.md`, tworzy labelki pętli na GitHubie.
+2. **`/to-issues-ralph`** — z planu/PRD publikuje epic (`[PRD]` z PRD i
    scenariuszem `## Jak odebrać`, label `ready-for-agent`) oraz sub-issues (vertical slices)
    z natywnymi relacjami „blocked by” i triage `complexity:*`; sub-issue `heavy` dostaje listę
    przypadków do przetestowania. Sub-issues nie mają sekcji ręcznej — scenariusz jest jeden,
@@ -382,7 +379,7 @@ w trakcie czekania (laptop wyłączony), rano uruchamiasz to samo co wieczorem (
 `ralph-once 52` albo `ralph-once`): ślad jest ważny, gdy issue jest w stanie z chwili przerwania
 (worker: otwarte z `ready-for-agent`; przegląd: zamknięte) i bieżąca gałąź jest ta sama. Wtedy
 brudne drzewo nie blokuje, a Ralph wznawia sesję przed bramkami i strażnikiem. Nieważny ślad
-znika z jedną linią na ekranie; ślad innego issue zostaje nietknięty, a ślad po wycofanym Codeksie jest usuwany. Gdy runtime
+znika z jedną linią na ekranie; ślad innego issue zostaje nietknięty, a ślad po wycofanym Codeksie jest usuwany. Gdy Claude
 nie podejmie sesji, run kończy się błędem z komunikatem, a ślad zostaje (usuń go, żeby wrócić do
 zwykłych reguł).
 

@@ -82,7 +82,7 @@ done
 echo
 echo "Gotowe (to instalujesz RAZ, globalnie — nie trzeba powtarzać per repo)."
 echo "  Skille Claude: /ralph-konfiguracja, /to-issues-ralph"
-echo "  Skille Codex:  \$ralph-konfiguracja, \$to-issues-ralph"
+echo "  Skille Codex:  \$ralph-konfiguracja, \$to-issues-ralph (tylko skille; Ralpha konfigurujesz i uruchamiasz w Claude)"
 echo "  Launchery: ralph-once, ralph-once-local, ralph-epic (wymagają $BIN_DIR w PATH)"
 if [ -f "$PLUGIN_MARKETPLACE" ]; then
   echo "  Codex plugin: repo-local marketplace gotowy pod $PLUGIN_MARKETPLACE"
@@ -92,7 +92,7 @@ if [ -f "$PLUGIN_MARKETPLACE" ]; then
 fi
 echo
 echo "Następny krok — W KAŻDYM repo, w którym chcesz używać Ralpha:"
-echo "  1. odpal w sesji Claude albo Codex: /ralph-konfiguracja lub \$ralph-konfiguracja"
-echo "     → zapisze sekcję ## Ralph do CLAUDE.md i AGENTS.md oraz utworzy labelki na GitHubie."
+echo "  1. odpal w sesji Claude: /ralph-konfiguracja"
+echo "     → zapisze sekcję ## Ralph do CLAUDE.md oraz utworzy labelki na GitHubie."
 echo "  2. (porządkowo) usuń stary, dedykowany katalog ralph/ z tego repo."
 echo "  Bez ## Ralph strażnik jest fail-closed i ralph-once od razu się zatrzyma."

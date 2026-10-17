@@ -1,7 +1,8 @@
 # ai-coding — agent notes
 
 Personal AI coding tooling: skills (`/zapisz`, `/podsumuj`, `/sesja`, `/sesja-konfiguracja`,
-`/ralph-konfiguracja`, `/to-issues-ralph`; Codex uses `$...`) plus the shared Ralph loop.
+`/ralph-konfiguracja`, `/to-issues-ralph`; Codex uses `$...`) plus the shared Ralph loop
+(Ralph runs on Claude only).
 Distributed as symlinks by `install.sh`.
 
 - **Glossary / domain model:** `CONTEXT.md` — consult it (grep for the term) before introducing a
@@ -55,7 +56,7 @@ bash ralph/test/epic.test.sh
 Run these after changing `ralph/*.sh` **or `ralph/prompt*.md`**. The model branch is stubbed via
 `RALPH_GATE_CMD`, so preflight tests are deterministic — no network, no installed agent runtime.
 
-`lib.test.sh` compares the rendered prompts against `ralph/test/golden/*` for both runtimes.
+`lib.test.sh` compares the rendered prompts against `ralph/test/golden/*` (one golden per prompt).
 After a deliberate prompt change, regenerate them and commit the diff:
 
 ```bash
