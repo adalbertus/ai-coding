@@ -8,8 +8,8 @@ SCRIPT_DIR="$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")" && pwd)"
 export RALPH_COLOR=0 RALPH_COLS=0
 # A worker or przegląd running these tests under ralph-epic inherits the run's variables; without
 # this, the tests would write test issue numbers into the real run's issue file, expect fds 3/4
-# that are not open, and render reports under the reviewer's title.
-unset RALPH_ISSUE_FILE RALPH_NOTIFY_HITL RALPH_TERM_FDS RALPH_REPORT_TITLE
+# that are not open, render reports under the reviewer's title, and name the epic's launch command.
+unset RALPH_ISSUE_FILE RALPH_NOTIFY_HITL RALPH_TERM_FDS RALPH_REPORT_TITLE RALPH_LAUNCH_CMD_OUTER
 . "$SCRIPT_DIR/../lib.sh"
 
 pass=0; fail=0

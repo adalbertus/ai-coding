@@ -15,6 +15,8 @@ trap 'rm -rf "$FAKE"' EXIT
 # No run log by default: the tests run inside this repo and must not write to its .git. The run
 # log has its own test below, in a throwaway repo. Plain output, so substrings match.
 export RALPH_RUN_LOG=off RALPH_COLOR=0
+# The worker and the bramka run these tests under ralph-epic, which exports its own launch command.
+unset RALPH_LAUNCH_CMD_OUTER RALPH_ISSUE_FILE RALPH_NOTIFY_HITL RALPH_TERM_FDS
 mkdir -p "$FAKE/bin"
 
 cat > "$FAKE/bin/gh" <<'GH'
