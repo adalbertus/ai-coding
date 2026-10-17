@@ -1069,6 +1069,27 @@ Oczekiwano dokładnie: ralph-base-branch: <gałąź> (np. ralph-base-branch: dev
   return 1
 }
 
+# --- Gate command. One line in the "## Ralph" section runs the whole gate in a single command. ---
+# Syntax, alone on its own line; a leading list marker and backticks around the whole command are
+# tolerated:
+#     ralph-gate: bash a.test.sh && bash b.test.sh
+# stdin: the "## Ralph" section (see ralph_contract_section), so a line outside it never counts.
+# Prints the command of the first such line. No line or an empty command -> no output, rc 1.
+ralph_gate_command() {
+  local line value
+  while IFS= read -r line; do
+    if [[ "$line" =~ ^[[:space:]]*([-*][[:space:]]+)?ralph-gate:[[:space:]]*(.*)$ ]]; then
+      value="${BASH_REMATCH[2]}"
+      value="${value%"${value##*[![:space:]]}"}"
+      if [[ "$value" =~ ^\`(.*)\`$ ]]; then value="${BASH_REMATCH[1]}"; fi
+      [ -n "$value" ] || return 1
+      printf '%s\n' "$value"
+      return 0
+    fi
+  done
+  return 1
+}
+
 # Parent (epic) number of issue $1 via gh; no output when it has none (GitHub answers 404).
 # rc 1 when GitHub could not answer at all — callers must not mistake that for "no parent".
 ralph_issue_parent() {

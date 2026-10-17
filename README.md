@@ -291,6 +291,10 @@ Prompty są stack-agnostyczne — całą specyfikę repo delegują do sekcji `##
   / `npm test`); worker używa dokładnie ich, nie wymyśla własnych.
 - **done-criteria** — kiedy zadanie jest skończone; czy część pracy wymaga weryfikacji
   człowieka (UI/urządzenie → `needs-human-test`).
+- **linia bramki** (wymagana) — jedna linia o stałej składni `ralph-gate: <komenda>`, osobno w swojej
+  linii: jedna komenda powłoki uruchamiająca całą bramkę (pętle testów połączone `&&`, więc kończy się
+  kodem ≠ 0, gdy którakolwiek pada). Strażnik sprawdza jej obecność bez modelu; bez niej Ralph staje
+  z odesłaniem do `/ralph-konfiguracja`, który dopisuje linię także do istniejącej sekcji.
 - **commit** (opcjonalnie) — język wiadomości, `main` vs branch/PR, gdzie trafia detal.
 - **doc-sync** (opcjonalnie) — trwałe dokumenty repo (known-gaps, backlog) i ich klasa; zamykając
   issue worker/człowiek najpierw godzi je z tym, co weszło. Słownik (`CONTEXT.md`) i ADR-y tylko

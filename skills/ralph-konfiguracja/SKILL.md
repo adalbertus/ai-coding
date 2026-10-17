@@ -121,6 +121,8 @@ Konfiguracja dla współdzielonej pętli Ralpha (`ralph-once` / `ralph-once-loca
 - `<komenda>` — <co robi>
 - `<komenda>` — <co robi>
 
+ralph-gate: <komenda1> && <komenda2>
+
 ### Done-criteria
 
 Zadanie jest skończone, gdy wszystkie feedback loops są zielone <oraz …>.
@@ -191,6 +193,13 @@ entry, an extra rule) — move it into the `CLAUDE.md` section, resolving confli
 and confirming anything ambiguous with the user. Only then delete the `## Ralph` section from
 `AGENTS.md` (through the next level-2 heading or end of file), leaving the rest of the file
 untouched. If that leaves `AGENTS.md` empty, tell the user instead of deleting it silently.
+
+`ralph-gate: <komenda>` is required: one shell command that runs the whole gate, built by
+joining the feedback-loop commands listed above with `&&` (so it exits non-zero when any fails).
+Keep it alone on its own line, exactly once, with the real commands. The strażnik halts the run
+when the line is missing or its command is empty. When `CLAUDE.md` already has a `## Ralph`
+section without this line, add it to that section (below the feedback loops) rather than
+leaving the section as is.
 
 Fill every placeholder. The section the strażnik accepts has **concrete, executable**
 instructions for both feedback loops and done-criteria.

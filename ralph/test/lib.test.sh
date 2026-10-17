@@ -437,6 +437,19 @@ expect_eq "verdict: green done, red failure, orange waiting for a human" "$r" "y
 expect_eq "outcome: codes are distinct" \
   "$(printf '%s\n' "$RALPH_EXIT_DONE" "$RALPH_EXIT_ERROR" "$RALPH_EXIT_NOTHING" "$RALPH_EXIT_AFK_FAILED" "$RALPH_EXIT_DISCOVERED" "$RALPH_EXIT_HITL_OPEN" "$RALPH_EXIT_HITL_TO_AFK" | sort -u | wc -l | tr -d ' ')" "7"
 
+# --- Gate command (ralph-gate:) ---
+expect_eq "gate: line present -> command" \
+  "$(ralph_gate_command <<<$'## Ralph\nralph-gate: bash a.sh && bash b.sh')" "bash a.sh && bash b.sh"
+expect_eq "gate: list marker and backticks tolerated" \
+  "$(ralph_gate_command <<<$'## Ralph\n- ralph-gate: `bash a.sh && bash b.sh`')" "bash a.sh && bash b.sh"
+expect_fail "gate: line absent -> no gate" ralph_gate_command <<<$'## Ralph\nFeedback: make test'
+expect_fail "gate: empty command -> no gate" ralph_gate_command <<<$'## Ralph\nralph-gate:   '
+gate_file=$(mktemp)
+printf '# T\nralph-gate: outside\n\n## Ralph\nx\n\n## Other\nralph-gate: also outside\n' > "$gate_file"
+expect_fail "gate: line outside ## Ralph does not count" \
+  bash -c ". '$SCRIPT_DIR/../lib.sh'; ralph_contract_section '$gate_file' | ralph_gate_command"
+rm -f "$gate_file"
+
 # --- Epic branch (ADR 0012) ---
 SECTION_WITH=$'## Ralph\n\n### Commit\n\nralph-base-branch: dev\n\n- Polish message.'
 expect_eq "base branch: line present -> branch name" "$(ralph_base_branch <<<"$SECTION_WITH")" "dev"

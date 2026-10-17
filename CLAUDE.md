@@ -78,6 +78,8 @@ from this checkout.
   After a deliberate prompt change, regenerate with `UPDATE_GOLDEN=1 bash ralph/test/lib.test.sh`
   and commit the golden diff.
 
+ralph-gate: bash ralph/test/preflight.test.sh && bash ralph/test/epic.test.sh && bash ralph/test/lib.test.sh
+
 ### Done-criteria
 
 A task is done when all three feedback loops are green and the issue's acceptance criteria are met.

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Ralph preflight guard — "strażnik". Fail-closed gate run before any work: the loop only
 # proceeds when the target repo declares a USABLE "## Ralph" section in CLAUDE.md
-# (feedback loops + done-criteria). AGENTS.md is never read (ADR 0020). Never guesses how to test — when in doubt, it halts.
+# (feedback loops + done-criteria + linia ralph-gate:). AGENTS.md is never read (ADR 0020). Never guesses how to test — when in doubt, it halts.
 #
 # Contract (this is the interface both once.sh and once-local.sh rely on):
 #   - run from the target repo's cwd;
@@ -40,6 +40,10 @@ section=$(ralph_contract_section "$contract_file")
 # Deterministic fast-fail: a heading with no real content below it is a placeholder.
 body=$(printf '%s\n' "$section" | sed '1d' | tr -d '[:space:]')
 [ -n "$body" ] || halt "Sekcja \"## Ralph\" jest pusta (placeholder)."
+
+# Deterministic: the gate command line (ralph-gate:) must be there; no model call without it.
+printf '%s\n' "$section" | ralph_gate_command >/dev/null \
+  || halt "Sekcja \"## Ralph\" nie ma linii ralph-gate: (jedna komenda uruchamiająca całą bramkę)."
 
 # Model gate: confirm the section actually holds runnable test/done instructions.
 gate_prompt="Poniżej sekcja \"## Ralph\" z pliku $contract_file repozytorium. Ma powiedzieć

@@ -44,7 +44,7 @@ expect_not() {
   fi
 }
 
-RALPH_SECTION=$'## Ralph\n\nFeedback loops przed commitem: `composer test`, `./vendor/bin/pint`.\nDone: zadanie skończone, gdy testy są zielone.\n'
+RALPH_SECTION=$'## Ralph\n\nFeedback loops przed commitem: `composer test`, `./vendor/bin/pint`.\nDone: zadanie skończone, gdy testy są zielone.\n\nralph-gate: composer test && ./vendor/bin/pint --test\n'
 
 # 1. Brak CLAUDE.md -> halt, kieruje do /ralph-konfiguracja.
 run "__NOFILE__"
@@ -89,7 +89,7 @@ run "$RALPH_SECTION" "echo cokolwiek"
 expect "gate śmieci (rc 0) -> halt: sekcja niekompletna" 1 "niekompletn"
 
 # 7. Podsekcje ### nie kończą sekcji (treść za ### nadal liczy się jako body) + READY.
-run $'## Ralph\n\n### Feedback\n`npm test`\n\n### Done\ngdy zielone\n' "echo READY"
+run $'## Ralph\n\n### Feedback\n`npm test`\n\n### Done\ngdy zielone\n\nralph-gate: npm test\n' "echo READY"
 expect "### podsekcje zostają w sekcji -> exit 0" 0
 
 # 8. Sekcja tylko w CLAUDE.md, bez AGENTS.md -> przechodzi, bez wzmianki o AGENTS.md.
@@ -107,7 +107,7 @@ run2() {
   rm -rf "$dir"
 }
 
-DIFFERENT_SECTION=$'## Ralph\n\nInne komendy: `make check`.\nCommituj prosto na `main`.\n'
+DIFFERENT_SECTION=$'## Ralph\n\nInne komendy: `make check`.\nCommituj prosto na `main`.\nralph-gate: make check\n'
 
 # 9. Różne sekcje w CLAUDE.md i AGENTS.md -> przechodzi (liczy się tylko CLAUDE.md).
 run2 "$RALPH_SECTION" "$DIFFERENT_SECTION" "echo READY"
@@ -118,6 +118,24 @@ expect_not "rozjazd nie jest raportowany" "się różnią"
 run2 $'# Repo\n\nOpis.\n' "$RALPH_SECTION" "echo READY"
 expect "sekcja tylko w AGENTS.md -> halt + /ralph-konfiguracja" 1 "/ralph-konfiguracja"
 expect_not "komunikat nie wspomina \$ralph-konfiguracja" '$ralph-konfiguracja'
+
+# 11. Brak linii ralph-gate: -> halt z odesłaniem do /ralph-konfiguracja, bez wywołania modelu
+#     (stub zostawia ślad w pliku; plik ma nie powstać).
+NOGATE_SECTION=$'## Ralph\n\nFeedback loops: `composer test`.\nDone: gdy testy zielone.\n'
+marker=$(mktemp -u)
+run "$NOGATE_SECTION" "touch $marker"
+expect "brak ralph-gate: -> halt + /ralph-konfiguracja" 1 "/ralph-konfiguracja"
+expect "brak ralph-gate: -> komunikat wspomina ralph-gate:" 1 "ralph-gate:"
+[ ! -e "$marker" ] && { echo "✓ brak ralph-gate: -> model nie wywołany"; pass=$((pass+1)); } \
+  || { echo "✗ brak ralph-gate: -> model został wywołany"; fail=$((fail+1)); rm -f "$marker"; }
+
+# 12. Pusta komenda w ralph-gate: = brak bramki.
+run $'## Ralph\n\nFeedback: `composer test`.\nralph-gate:\n' "echo READY"
+expect "pusta komenda ralph-gate: -> halt" 1 "ralph-gate:"
+
+# 13. Linia ralph-gate: poza sekcją ## Ralph się nie liczy.
+run $'## Ralph\n\nFeedback: `composer test`.\n\n## Inne\nralph-gate: composer test\n' "echo READY"
+expect "ralph-gate: poza sekcją -> halt" 1 "ralph-gate:"
 
 echo
 echo "Wynik: $pass OK, $fail FAIL"
