@@ -91,7 +91,7 @@ i **idempotentny** (ponowne uruchomienie nie psuje poprawnych symlinków). Tworz
 
 - skille Claude → `~/.claude/skills`: `ralph-konfiguracja`, `to-issues-ralph`, `odbior` (tylko Claude)
 - skille Codex → `${CODEX_HOME:-~/.codex}/skills`: te same nazwy, wołane w Codexie jako `$...`
-- launchery → `~/.local/bin`: `ralph-once`, `ralph-once-local`, `ralph-epic`
+- launchery → `~/.local/bin`: `ralph-once`, `ralph-once-local`, `ralph-epic`, `ralph-lista`
 
 Repo-local plugin Codex (`.agents/plugins/marketplace.json` + `.agents/plugins/plugins/ai-coding`)
 jest częścią repo, instalator go nie tworzy — tylko wypisuje dwie komendy `codex plugin`, którymi
@@ -141,6 +141,7 @@ ralph-once 12                      # 12 to epic → pierwsze wolne z jego sub-is
 ralph-once                         # pętla sama wybiera następne zadanie
 ralph-once-local                   # zadania z lokalnych plików issues/*.md, nie z GitHuba
 ralph-once 224 --force-model=opus  # Opus zamiast modelu dobranego do złożoności zadania
+ralph-lista                        # epiki i otwarte sub-issues bieżącego repo; --all dodaje zamknięte epiki
 ```
 
 - `ralph-epic` powtarza `ralph-once` na kolejnych sub-issues, aż epic trafi do odbioru albo coś
@@ -155,6 +156,9 @@ ralph-once 224 --force-model=opus  # Opus zamiast modelu dobranego do złożono�
   Równoległe przebiegi rób w osobnych worktree.
 - Log każdego przebiegu leży w `.git/ralph-logs/`; gdy coś się psuje, powiedz agentowi „zobacz logi
   w `.git/ralph-logs/`”. Co jest na ekranie i w logach: [docs/ralph-szczegoly.md](docs/ralph-szczegoly.md).
+- `ralph-lista` to przegląd po przerwie, bez modelu (tylko `gh` + `jq`): epiki czekające na odbiór
+  (`needs-human-test`) idą pierwsze, przy sub-issues bez `ready-for-agent` stoi `⚠ wymaga człowieka`,
+  a na końcu sekcja `Bez epica:` z otwartymi issues spoza epików.
 
 Wokół pętli: **strażnik** (`ralph/preflight.sh`) przed każdym startem sprawdza, czy repo ma gotową
 sekcję `## Ralph`, i bez niej zatrzymuje pętlę. **Bramka** to komenda z `ralph-gate:`, którą pętla sama
@@ -263,7 +267,7 @@ znikają przy przesiadce na inną maszynę.
 ## Odinstalowanie
 
 ```bash
-rm ~/.claude/skills/{ralph-konfiguracja,to-issues-ralph}
+rm ~/.claude/skills/{ralph-konfiguracja,to-issues-ralph,odbior}
 rm ~/.codex/skills/{ralph-konfiguracja,to-issues-ralph}
-rm ~/.local/bin/{ralph-once,ralph-once-local,ralph-epic}
+rm ~/.local/bin/{ralph-once,ralph-once-local,ralph-epic,ralph-lista}
 ```
