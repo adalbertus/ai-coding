@@ -315,13 +315,16 @@ zmiana (epic z jednym sub-issue). Terminologia: `CONTEXT.md` (**Epic**, **Odbió
 
 1. **`/ralph-konfiguracja`** — raz na repo. Wykrywa stack, pisze
    `## Ralph` do `CLAUDE.md`, tworzy labelki pętli na GitHubie.
-2. **`/to-issues-ralph`** — z planu/PRD publikuje epic (`[PRD]` z PRD i
-   scenariuszem `## Jak odebrać`, label `ready-for-agent`) oraz sub-issues (vertical slices)
-   z natywnymi relacjami „blocked by” i triage `complexity:*`; sub-issue `heavy` dostaje listę
-   przypadków do przetestowania. Sub-issues nie mają sekcji ręcznej — scenariusz jest jeden,
-   w epicu. `/to-issues-ralph <nr>` robi samo rozbicie istniejącego epica w świeżej sesji (PRD
-   z treści epica); odmawia, gdy to nie `[PRD]` albo epic ma już sub-issues.
-   Po tym kroku nie musisz nic robić poza uruchomieniem pętli.
+2. **Grill → `/to-issues-ralph` → `/clear` → `/to-issues-ralph <nr>`.**
+   `/to-issues-ralph` bez argumentu uzupełnia PRD o ustalenia z grilla, których w nim brakuje
+   (bez pytań; to, co jest już w ADR/`CONTEXT.md`, tylko wskazuje), publikuje epic (`[PRD]` ze
+   scenariuszem `## Jak odebrać`, label `ready-for-agent`) i kończy, podając numer epica
+   i następną komendę. Rozbicia nie robi. Po `/clear` `/to-issues-ralph <nr>` robi samo rozbicie
+   w świeżej sesji (PRD z treści epica): sub-issues (vertical slices) z natywnymi relacjami
+   „blocked by” i triage `complexity:*`; sub-issue `heavy` dostaje listę przypadków do
+   przetestowania. Sub-issues nie mają sekcji ręcznej — scenariusz jest jeden, w epicu.
+   Wywołanie z numerem odmawia, gdy to nie `[PRD]` albo epic ma już sub-issues.
+   Potem zostaje tylko `ralph-epic <nr>`.
 3. **`ralph-once`** (albo `ralph-once-local`) w pętli z terminala — implementacja AFK, jedno
    sub-issue na run.
 4. **Odbiór** — pętla staje raz na epic, gdy skrypt oznaczy epic (ostatnie sub-issue zamknięte; patrz niżej).

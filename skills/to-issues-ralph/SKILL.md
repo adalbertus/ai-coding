@@ -1,12 +1,13 @@
 ---
 name: to-issues-ralph
-description: Turn a finished grill into a published Ralph-loop epic in one non-interactive run — publishes the PRD as a parent `[PRD]` issue with an acceptance scenario (`## Jak odebrać`), breaks it into vertical slices published as native sub-issues of that epic, then adds complexity triage per sub-issue — and, for each heavy one, the list of cases its tests must cover. Asks no questions. Called with an issue number (`/to-issues-ralph <nr>`), it breaks down an existing epic in a fresh session, reading the PRD from the epic's body. Every piece of work is an epic, even a one-line change. Use after a grill session to convert a plan/PRD into issues the Ralph autonomous loop (ralph/once.sh) will implement, or when the user mentions Ralph, epic, complexity triage, or per-issue model selection.
+description: Turn a finished grill into a Ralph-loop epic in two non-interactive invocations. Without an argument (`/to-issues-ralph`) it fills the PRD with grill findings missing from it, publishes it as a parent `[PRD]` issue with an acceptance scenario (`## Jak odebrać`), and ends the turn with the epic number and the next command (`/clear`, then `/to-issues-ralph <nr>`) — no breakdown. With an issue number (`/to-issues-ralph <nr>`), in a fresh session, it reads the PRD from the epic's body, breaks it into vertical slices published as native sub-issues of that epic, then adds complexity triage per sub-issue — and, for each heavy one, the list of cases its tests must cover. Asks no questions. Every piece of work is an epic, even a one-line change. Use after a grill session to convert a plan/PRD into issues the Ralph autonomous loop (ralph/once.sh) will implement, or when the user mentions Ralph, epic, complexity triage, or per-issue model selection.
 ---
 
 # To Issues (Ralph)
 
-Runs the whole post-grill chain **non-interactively**: publish the PRD as an epic (parent
-issue) → break it into vertical slices published as sub-issues of that epic → complexity
+Runs the post-grill chain **non-interactively** in two invocations. Without an argument: fill
+the PRD gaps → publish the PRD as an epic (parent issue) → stop. With an epic number, in a
+fresh session: break it into vertical slices published as sub-issues of that epic → complexity
 triage → report. It asks no questions. Every piece of work is an epic, even a one-line change:
 an epic with a single sub-issue (ADR 0012).
 
@@ -17,7 +18,7 @@ checkpoints. Delegating (not copying) means upstream changes keep working here.
 ## Invocation with an epic number
 
 `/to-issues-ralph <nr>` breaks down an **existing** epic in a fresh session; with no argument,
-run the whole chain below from step 1.
+run step 1 only and stop (see "Invocation without an argument").
 
 1. Fetch the issue: `gh issue view <nr> --json number,title,body`.
 2. Check the preconditions. If either fails, print one message saying which and why, create
@@ -29,6 +30,15 @@ run the whole chain below from step 1.
    run step 1 (the epic exists); use that PRD as the input to step 2 with epic number `<nr>`,
    then continue with steps 3–5 and the report unchanged.
 
+## Invocation without an argument
+
+Run step 1 of the workflow and **stop there**. Do not run steps 2–5 and do not break down.
+Before publishing, review the grill context for findings that are in neither the PRD nor the
+repo's documents (`CONTEXT.md`, `docs/adr/`): decisions, rejected options, constraints, edge
+cases. Add each to the matching PRD section without asking. A finding already recorded in an
+ADR or `CONTEXT.md` is only referenced, not copied. After publishing, end the turn with the
+epic number and this line: `/clear`, then `/to-issues-ralph <nr>`.
+
 ## Workflow
 
 1. **Publish the epic.** Invoke the `to-prd` skill with this override:
@@ -37,20 +47,19 @@ run the whole chain below from step 1.
    > as the epic: title `[PRD] <name>`, label `ready-for-agent`, and do NOT add any
    > `complexity:*` label. Before publishing, append exactly one section, `## Jak odebrać`:
    > the acceptance scenario for the whole epic — 3–7 concrete steps a human follows to judge
-   > whether the result is what they want, using real UI labels where that makes sense. Also
-   > keep the full PRD in your response as breakdown input. The PRD is not a stopping point:
-   > in the same turn, continue with step 2 of `to-issues-ralph`.
+   > whether the result is what they want, using real UI labels where that makes sense. Do
+   > not keep the PRD in your response as breakdown input and do not continue to a breakdown:
+   > publishing the epic is the end of this run.
 
    Why: the PRD denoises a long grill session into a clean one-page breakdown input and
-   supplies the exhaustive user-story list the breakdown uses as a coverage checklist. It
-   lands in the epic because that parent issue exists anyway for odbiór (ADR 0012), so storing
+   supplies the exhaustive user-story list the breakdown uses as a coverage checklist. The
+   breakdown runs later, in a fresh session, from the epic's body. It lands in the epic because that parent issue exists anyway for odbiór (ADR 0012), so storing
    it costs nothing; `ralph/once.sh` filters `[PRD]` issues out, so the epic is never picked
    up as work. The epic is published before its sub-issues so they can point at it.
 
-2. **Run the breakdown non-interactively.** Invoke the `to-issues` skill with this override:
-   > Run `to-issues` **non-interactively** from the PRD synthesized in step 1 (already in
-   > context — do not look for a file; when invoked with an epic number, the PRD is the
-   > epic's body). Do NOT perform its step 4 (Quiz the user) and do NOT
+2. **Run the breakdown non-interactively** (only with an epic number). Invoke the `to-issues` skill with this override:
+   > Run `to-issues` **non-interactively** from the PRD in the epic's body (do not look
+   > for a file). Do NOT perform its step 4 (Quiz the user) and do NOT
    > wait for approval — treat the breakdown as approved and proceed straight to publishing.
    > This countermands `to-issues`' "Iterate until the user approves." Publish every slice as
    > a native sub-issue of the epic from step 1: set the parent with
@@ -101,7 +110,7 @@ run the whole chain below from step 1.
    issue. Always write the list; when the code leaves a case uncertain, write your best case
    and say what is uncertain.
 
-End the turn only here, with the epic (number, title) followed by one line per sub-issue:
+End the turn only here (invocation with an epic number), with the epic (number, title) followed by one line per sub-issue:
 number, title, tier, blockers.
 
 ## Complexity rubric
